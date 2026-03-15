@@ -7,9 +7,11 @@ from typing import Optional, List
 import sys
 import re
 
-from rich.prompt import Prompt
+from rich.prompt import Prompt, Confirm
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich import print as rprint
+from rich.panel import Panel
+from rich import box
 
 # Windows 编码修复（延迟执行）
 _encoding_fixed = False
@@ -48,6 +50,100 @@ from src.ui.tables import show_optimized_versions, show_framework_selection
 from src.clipboard import copy_to_clipboard
 
 logger = get_logger("cli")
+
+
+# ==================== 发散问题生成 ====================
+
+CLARIFYING_QUESTIONS_PROMPT = """你是一个专业的需求分析专家。分析用户的原始 prompt，生成 3-5 个帮助澄清需求的问题。
+
+要求：
+1. 问题要具体、有针对性
+2. 帮助用户明确目标、受众、格式等关键信息
+3. 每个问题一行，不要编号
+4. 只输出问题，不要其他解释
+
+用户的原始 prompt：
+{prompt}
+"""
+
+
+def generate_clarifying_questions(prompt: str, client) -> List[str]:
+    """生成澄清问题"""
+    messages = [
+        {"role": "user", "content": CLARIFYING_QUESTIONS_PROMPT.format(prompt=prompt)}
+    ]
+
+    try:
+        response = client.chat(messages)
+        # 解析问题列表
+        questions = []
+        for line in response.strip().split('\n'):
+            line = line.strip()
+            # 移除可能的编号
+            if line and not line.startswith('#'):
+                # 移除数字编号如 "1. "、"1) "、"1、"
+                cleaned = re.sub(r'^\d+[.、)]\s*', '', line)
+                if cleaned:
+                    questions.append(cleaned)
+        return questions[:5]  # 最多5个问题
+    except Exception as e:
+        logger.error(f"生成澄清问题失败: {e}")
+        return []
+
+
+def ask_clarifying_questions(prompt: str, client) -> str:
+    """询问澄清问题并返回增强后的 prompt"""
+    # 检查 prompt 长度，太短的 prompt 不需要澄清
+    if len(prompt) < 15:
+        return prompt
+
+    # 生成问题
+    with Progress(
+        SpinnerColumn(spinner_name="dots"),
+        TextColumn("[cyan]分析需求中...[/cyan]"),
+        console=console,
+        transient=True,
+    ) as progress:
+        progress.add_task("analyzing")
+        questions = generate_clarifying_questions(prompt, client)
+
+    if not questions:
+        return prompt
+
+    # 显示问题
+    console.print()
+    console.print(Panel(
+        "[bold]为了更好地优化，请回答以下问题：[/bold]\n"
+        "[dim]（按回车跳过，输入 'skip' 跳过所有）[/dim]",
+        title="需求澄清",
+        border_style="cyan",
+        box=box.ROUNDED,
+    ))
+    console.print()
+
+    answers = []
+    for i, question in enumerate(questions, 1):
+        console.print(f"  [cyan][bold]{i}[/bold][/cyan] {question}")
+        answer = Prompt.ask(f"  [dim]回答[/dim]", default="")
+
+        if answer.lower() == 'skip':
+            break
+        if answer.strip():
+            answers.append(f"Q: {question}\nA: {answer.strip()}")
+
+        console.print()
+
+    if not answers:
+        return prompt
+
+    # 整合答案到 prompt
+    enhanced_prompt = f"""原始需求：
+{prompt}
+
+补充信息：
+{chr(10).join(answers)}
+"""
+    return enhanced_prompt
 
 
 # ==================== 斜杠命令处理 ====================
@@ -418,16 +514,22 @@ def generate_optimized_versions(
 
 def optimize_prompt(prompt: str, client) -> None:
     """优化 Prompt"""
+    # 询问澄清问题（如果启用）
+    if global_config.enable_clarifying_questions:
+        enhanced_prompt = ask_clarifying_questions(prompt, client)
+    else:
+        enhanced_prompt = prompt
+
     # 获取推荐框架
-    framework = get_recommended_framework(prompt)
-    reason = get_framework_match_reason(prompt, framework)
+    framework = get_recommended_framework(enhanced_prompt)
+    reason = get_framework_match_reason(enhanced_prompt, framework)
     fw_info = PROMPT_FRAMEWORKS[framework]
 
     # 显示推荐
     rprint(f"\n[dim]推荐框架: [cyan]{fw_info.name}[/cyan] ({reason})[/dim]\n")
 
     # 生成优化版本
-    results = generate_optimized_versions(prompt, client, num_versions=3, framework=framework)
+    results = generate_optimized_versions(enhanced_prompt, client, num_versions=3, framework=framework)
 
     if not results:
         print_error("优化失败，请重试")

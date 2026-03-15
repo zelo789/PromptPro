@@ -74,6 +74,9 @@ class Config:
     # 剪贴板配置
     auto_clipboard: bool = True
 
+    # 问答式需求确认
+    enable_clarifying_questions: bool = True
+
     # 日志配置
     log_level: str = "INFO"
 
