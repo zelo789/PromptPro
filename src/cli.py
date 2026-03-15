@@ -348,7 +348,7 @@ def generate_optimized_versions(
     client,
     num_versions: int = 3,
     framework: Optional[PromptFramework] = None,
-) -> List[Dict]:
+) -> List[dict]:
     """生成优化版本"""
     results = []
     levels = list(OptimizationLevel)
