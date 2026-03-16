@@ -2,21 +2,21 @@
 
 <p align="center">
   <strong>Professional AI Prompt Optimization CLI Tool</strong><br>
-  <em>Make your prompts work better with AI</em>
+  <em>让 Prompt 更懂 AI</em>
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/promptpro/">
-    <img src="https://img.shields.io/pypi/v/promptpro.svg" alt="PyPI version">
-  </a>
   <a href="https://www.python.org/downloads/">
     <img src="https://img.shields.io/badge/python-3.9+-blue.svg" alt="Python 3.9+">
   </a>
   <a href="https://opensource.org/licenses/MIT">
     <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
   </a>
-  <a href="https://github.com/zelo789/PromptPro/actions">
-    <img src="https://img.shields.io/github/actions/workflow/status/zelo789/PromptPro/ci.yml?branch=main" alt="Build Status">
+  <a href="https://github.com/zelo789/PromptPro/actions/workflows/ci.yml">
+    <img src="https://github.com/zelo789/PromptPro/actions/workflows/ci.yml/badge.svg" alt="CI Status">
+  </a>
+  <a href="https://github.com/zelo789/PromptPro/blob/main/CONTRIBUTING.md">
+    <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome">
   </a>
 </p>
 
@@ -35,6 +35,7 @@
 
 Writing effective prompts is the key to getting great results from AI models. PromptPro helps you craft better prompts through:
 
+- **🎯 Clarifying Questions (核心创新)** - Interactive Q&A to understand your needs before optimization, enabled by default
 - **Intelligent Framework Matching** - Automatically recommends the optimal prompt framework based on your content
 - **Multi-Level Optimization** - Generate light, moderate, and deep optimization versions for comparison
 - **Privacy-First Design** - Runs locally via Ollama, your data never leaves your machine
@@ -42,8 +43,21 @@ Writing effective prompts is the key to getting great results from AI models. Pr
 ```
 Input:  "写一个排序算法"
 
+┌─────────────────────────────────────────────┐
+│  需求澄清                                     │
+│  为了更好地优化，请回答以下问题：               │
+│                                              │
+│  1. 需要什么类型的排序算法？（快排/归并/堆排序）│
+│     回答: 快速排序，要求稳定                   │
+│                                              │
+│  2. 数据规模大约多大？                         │
+│     回答: 100万条整数                         │
+│                                              │
+│  3. 对时间复杂度有要求吗？                     │
+│     回答: O(n log n)                         │
+└─────────────────────────────────────────────┘
+
 Recommended: APE Framework (code/technical tasks)
-Matched: Detected keyword '算法' → action-oriented framework
 
 Versions Generated:
   Light:   "请编写一个排序算法，说明其时间复杂度"
@@ -69,6 +83,35 @@ Versions Generated:
 | **RISEN** | Role, Instructions, Steps, End Goal, Narrowing | Multi-step procedures, workflows |
 | **TAG** | Task, Action, Goal | Simple queries, daily conversations |
 
+### 🎯 Clarifying Questions (核心创新)
+
+**默认启用** - 在优化前通过 AI 生成针对性问题，帮助澄清需求：
+
+```
+你的输入: "帮我写一个登录系统"
+
+┌─ 需求澄清 ─────────────────────────────────────┐
+│  为了更好地优化，请回答以下问题：               │
+│  （按回车跳过，输入 'skip' 跳过所有）           │
+│                                                │
+│  1. 登录方式有哪些？（账号密码/手机/第三方）     │
+│     回答: 账号密码 + 微信登录                   │
+│                                                │
+│  2. 需要什么技术栈？                           │
+│     回答: Python Flask + JWT                  │
+│                                                │
+│  3. 有安全要求吗？                             │
+│     回答: 需要防暴力破解，密码加密存储          │
+└────────────────────────────────────────────────┘
+
+→ 整合后的 Prompt 包含完整需求信息
+→ 生成的优化版本更加精准
+```
+
+**如何开关：**
+- 交互模式输入 `/clarify` 切换开/关
+- 配置文件设置 `enable_clarifying_questions: true/false`
+
 ### 3 Optimization Levels
 
 - **Light** - Clarity improvements only, preserves original structure
@@ -85,6 +128,7 @@ Versions Generated:
 ### Additional Features
 
 - Smart framework recommendation based on content analysis
+- **Requirement Documents** - Custom requirement docs for project context
 - History management with search and export
 - Cross-platform clipboard support
 - Interactive and command-line modes
@@ -142,7 +186,7 @@ pp
 ```
 
 ```
-PromptPro v0.4.0 - Make your prompts work better with AI
+PromptPro v0.4.0 - 让 Prompt 更懂 AI
 Type /help for commands, or enter text to optimize
 
 Provider: Ollama | Model: llama3
@@ -168,7 +212,7 @@ Optimizing...
 [FW] APE Framework
      "Action: Write a sorting algorithm..."
 
-Enter version number to copy (1-4):
+Enter version number to copy [dim](1-4)[/dim]:
 ```
 
 ### CLI Commands
@@ -199,6 +243,12 @@ pp --history
 | `/config` | | Show configuration |
 | `/history` | | View optimization history |
 | `/temp <value>` | | Set temperature (0.0-2.0) |
+| `/clarify` | | Toggle clarifying questions mode |
+| `/docs` | `/d` | List requirement documents |
+| `/load <name>` | `/l` | Load a requirement document |
+| `/doc` | | Show current document |
+| `/savedoc <name>` | | Create new document |
+| `/cleardoc` | | Clear current document |
 
 ### Quick Model Switching
 
@@ -209,14 +259,87 @@ In interactive mode, enter a number to quickly switch models:
 > 2  # Switch to second model
 ```
 
----
+### 📄 Requirement Documents
 
-## Frameworks
+Create custom requirement documents to provide project context for prompt optimization.
 
-### Framework Selection Decision
+**Document Format** (Markdown files in `prompts/` directory):
+
+```markdown
+name: 登录系统开发文档
+intro: |
+  这是一个用户登录系统的开发需求，包含账号密码登录和第三方 OAuth 登录。
+tune: |
+  - 输出代码需要包含详细注释
+  - 优先使用 TypeScript
+  - 需要考虑安全性（防 SQL 注入、XSS）
+```
+
+**Usage:**
 
 ```
-Your Prompt
+> /docs              # List all documents
+> /load example      # Load document by name or number
+> /doc               # Show current document
+> /cleardoc          # Clear current document
+```
+
+When a document is loaded, its context is automatically integrated into prompt optimization.
+
+---
+
+## Architecture
+
+### Core Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        PromptPro 优化流程                             │
+└─────────────────────────────────────────────────────────────────────┘
+
+用户输入 Prompt
+       │
+       ▼
+┌──────────────────┐
+│ 🎯 需求澄清阶段   │  ◀── 核心创新（默认启用）
+│ (Clarifying Q&A) │
+└──────────────────┘
+       │
+       │  AI 生成 3-5 个针对性问题
+       │  用户回答补充需求细节
+       │  整合为增强后的 Prompt
+       ▼
+┌──────────────────┐
+│ 📊 框架推荐阶段   │
+│ (Framework Match)│
+└──────────────────┘
+       │
+       │  分析关键词和内容特征
+       │  智能匹配最佳框架
+       ▼
+┌──────────────────┐
+│ ⚡ 多级优化阶段   │
+│ (Optimization)   │
+└──────────────────┘
+       │
+       ├─→ Light 版本   (清晰度优化)
+       ├─→ Moderate 版本 (结构+上下文)
+       ├─→ Deep 版本    (全面优化)
+       └─→ Framework 版本 (框架应用)
+       │
+       ▼
+┌──────────────────┐
+│ 📋 结果输出       │
+│ • 终端展示        │
+│ • 剪贴板复制      │
+│ • 历史记录        │
+└──────────────────┘
+```
+
+### Framework Selection Logic
+
+```
+Enhanced Prompt (增强后的 Prompt)
     │
     ├─ Contains code/technical keywords? ────→ APE Framework
     │
@@ -271,6 +394,31 @@ Components:
 
 Configuration file: `~/.prompt-optimizer/config.json`
 
+### 🔐 API Key 配置（推荐环境变量）
+
+**安全最佳实践**：使用环境变量存储 API Key，避免写入配置文件。
+
+```bash
+# Linux/macOS - 添加到 ~/.bashrc 或 ~/.zshrc
+export OPENAI_API_KEY="sk-your-key"
+export CLAUDE_API_KEY="sk-ant-your-key"
+
+# Windows PowerShell
+$env:OPENAI_API_KEY = "sk-your-key"
+
+# 或使用 .env 文件（复制 .env.example）
+cp .env.example .env
+```
+
+| 环境变量 | 说明 |
+|----------|------|
+| `OPENAI_API_KEY` | OpenAI API Key |
+| `CLAUDE_API_KEY` | Claude API Key |
+| `CUSTOM_API_KEY` | 自定义 API Key |
+| `CUSTOM_BASE_URL` | 自定义 API 端点 |
+
+**优先级**：环境变量 > 配置文件
+
 ### Basic Settings
 
 | Setting | Description | Default |
@@ -291,7 +439,7 @@ Configuration file: `~/.prompt-optimizer/config.json`
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `openai_api_key` | API key | `` |
+| `openai_api_key` | API key (推荐使用环境变量) | `` |
 | `openai_base_url` | API endpoint | `https://api.openai.com/v1` |
 | `openai_model` | Model name | `gpt-4o-mini` |
 
@@ -299,7 +447,7 @@ Configuration file: `~/.prompt-optimizer/config.json`
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `claude_api_key` | API key | `` |
+| `claude_api_key` | API key (推荐使用环境变量) | `` |
 | `claude_base_url` | API endpoint | `https://api.anthropic.com` |
 | `claude_model` | Model name | `claude-3-5-sonnet-20241022` |
 
@@ -311,6 +459,21 @@ Configuration file: `~/.prompt-optimizer/config.json`
 | `max_history_items` | Maximum records | `100` |
 | `auto_clipboard` | Auto-copy to clipboard | `true` |
 
+### Example Configs
+
+项目提供示例配置文件：
+
+```bash
+# Ollama 本地
+cp examples/config.ollama.json ~/.prompt-optimizer/config.json
+
+# OpenAI
+cp examples/config.openai.json ~/.prompt-optimizer/config.json
+
+# Claude
+cp examples/config.claude.json ~/.prompt-optimizer/config.json
+```
+
 ### Switching Providers
 
 Edit `~/.prompt-optimizer/config.json`:
@@ -318,7 +481,6 @@ Edit `~/.prompt-optimizer/config.json`:
 ```json
 {
   "provider": "openai",
-  "openai_api_key": "sk-...",
   "openai_model": "gpt-4o-mini"
 }
 ```
@@ -361,10 +523,11 @@ mypy src
 ### Project Structure
 
 ```
-promptpro/
+.
 ├── src/
 │   ├── __init__.py          # Package exports
 │   ├── cli.py               # CLI entry point
+│   ├── commands.py          # Interactive commands
 │   ├── optimizer.py         # Optimization logic
 │   ├── strategies.py        # Framework definitions
 │   ├── config.py            # Configuration management
@@ -373,11 +536,14 @@ promptpro/
 │   ├── clipboard.py         # Clipboard utilities
 │   ├── exceptions.py        # Custom exceptions
 │   ├── logger.py            # Logging configuration
+│   ├── requirement.py       # Requirement documents
 │   └── ui/
 │       ├── __init__.py
 │       ├── console.py       # Console setup
 │       ├── panels.py        # Panel components
 │       └── tables.py        # Table components
+├── prompts/                 # Requirement documents
+│   └── example-login.md     # Example document
 ├── tests/
 ├── pyproject.toml
 ├── README.md

@@ -386,3 +386,109 @@ def show_framework_components(framework: PromptFramework) -> None:
     console.print("\n[bold yellow]框架组成要素：[/bold yellow]")
     for comp in info.components:
         console.print(f"  [cyan]•[/cyan] {comp}")
+
+
+def show_docs_list(docs: List[dict], current_doc: Optional[dict] = None) -> None:
+    """显示文档列表
+
+    Args:
+        docs: 文档信息列表 [{'name': ..., 'file': ..., 'preview': ...}, ...]
+        current_doc: 当前文档信息（可选）
+    """
+    if not docs:
+        console.print()
+        console.print(Panel(
+            "[dim]prompts/ 目录下暂无需求文档[/dim]\n"
+            "[dim]使用 /savedoc <名称> 创建新文档[/dim]",
+            title="需求文档",
+            border_style="cyan",
+            box=box.ROUNDED,
+        ))
+        return
+
+    console.print()
+    console.print(Panel(
+        f"[bold]需求文档列表[/bold]\n"
+        f"[dim]共 {len(docs)} 个文档[/dim]",
+        border_style="cyan",
+        box=box.ROUNDED,
+    ))
+    console.print()
+
+    table = Table(
+        box=box.ROUNDED,
+        border_style="cyan",
+        header_style="bold magenta",
+    )
+    table.add_column("编号", style="cyan", width=6)
+    table.add_column("文件名", style="green", width=20)
+    table.add_column("名称", style="white", width=25)
+    table.add_column("简介预览", style="dim", width=30)
+    table.add_column("状态", style="yellow", width=10)
+
+    current_file = current_doc.get('file') if current_doc else None
+
+    for i, doc in enumerate(docs, 1):
+        is_current = doc.get('file') == current_file
+        status = "[green]当前[/green]" if is_current else ""
+        table.add_row(
+            str(i),
+            doc.get('file', ''),
+            doc.get('name', ''),
+            doc.get('preview', '')[:30],
+            status,
+        )
+
+    console.print(table)
+    console.print("\n[dim]使用 /load <编号或文件名> 加载文档[/dim]")
+    console.print("[dim]使用 /doc 查看当前文档详情[/dim]\n")
+
+
+def show_doc_detail(doc) -> None:
+    """显示文档详情
+
+    Args:
+        doc: RequirementDoc 对象
+    """
+    from src.requirement import RequirementDoc
+
+    if not doc:
+        console.print()
+        console.print(Panel(
+            "[dim]未加载任何需求文档[/dim]\n"
+            "[dim]使用 /docs 查看可用文档[/dim]",
+            title="当前文档",
+            border_style="cyan",
+            box=box.ROUNDED,
+        ))
+        return
+
+    console.print()
+    console.print(Panel(
+        f"[bold]{doc.name}[/bold]\n"
+        f"[dim]文件: {doc.file_path}[/dim]",
+        title="需求文档",
+        border_style="green",
+        box=box.ROUNDED,
+    ))
+    console.print()
+
+    # 背景介绍
+    if doc.intro:
+        console.print(Panel(
+            doc.intro,
+            title="[cyan]背景介绍[/cyan]",
+            border_style="cyan",
+            box=box.ROUNDED,
+        ))
+
+    # 调优要求
+    if doc.tune:
+        console.print(Panel(
+            doc.tune,
+            title="[yellow]调优要求[/yellow]",
+            border_style="yellow",
+            box=box.ROUNDED,
+        ))
+
+    console.print("\n[dim]优化 Prompt 时将自动整合此文档内容[/dim]\n")

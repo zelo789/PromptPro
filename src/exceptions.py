@@ -37,6 +37,11 @@ class ErrorCode:
     # 剪贴板错误 (6xx)
     CLIPBOARD_COPY_FAILED = 601
 
+    # 需求文档错误 (7xx)
+    REQUIREMENT_NOT_FOUND = 701
+    REQUIREMENT_INVALID = 702
+    REQUIREMENT_READ_FAILED = 703
+
     # 通用错误 (9xx)
     UNKNOWN_ERROR = 999
 
@@ -140,6 +145,18 @@ class ClipboardError(PromptProError):
         self,
         message: str,
         error_code: int = ErrorCode.CLIPBOARD_COPY_FAILED,
+        details: Optional[Any] = None,
+    ):
+        super().__init__(message, error_code, details)
+
+
+class RequirementError(PromptProError):
+    """需求文档相关错误"""
+
+    def __init__(
+        self,
+        message: str,
+        error_code: int = ErrorCode.REQUIREMENT_NOT_FOUND,
         details: Optional[Any] = None,
     ):
         super().__init__(message, error_code, details)

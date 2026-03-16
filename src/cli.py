@@ -4,6 +4,7 @@ CLI 入口模块 - PromptPro 的用户交互界面
 提供 Claude Code 风格的单行输入交互界面，支持斜杠命令。
 """
 from typing import Optional, List
+from pathlib import Path
 import sys
 import re
 
@@ -36,6 +37,7 @@ from src.history import global_history
 from src.strategies import PromptFramework, LEVEL_CONFIGS, OptimizationLevel, PROMPT_FRAMEWORKS, get_recommended_framework
 from src.logger import setup_logging, get_logger
 from src.exceptions import PromptProError
+from src.requirement import get_requirement_manager, RequirementDoc
 
 from src.ui import (
     console,
@@ -46,7 +48,7 @@ from src.ui import (
     print_prompt_panel,
     print_analysis,
 )
-from src.ui.tables import show_optimized_versions, show_framework_selection
+from src.ui.tables import show_optimized_versions, show_framework_selection, show_docs_list, show_doc_detail
 from src.clipboard import copy_to_clipboard
 
 logger = get_logger("cli")
@@ -94,20 +96,20 @@ def generate_clarifying_questions(prompt: str, client) -> List[str]:
 def ask_clarifying_questions(prompt: str, client) -> str:
     """询问澄清问题并返回增强后的 prompt"""
     # 检查 prompt 长度，太短的 prompt 不需要澄清
-    if len(prompt) < 15:
+    # 中文每个字符都算，所以阈值设小一点
+    if len(prompt) < 5:
+        logger.debug(f"Prompt too short ({len(prompt)} chars), skipping clarifying questions")
         return prompt
 
     # 生成问题
-    with Progress(
-        SpinnerColumn(spinner_name="dots"),
-        TextColumn("[cyan]分析需求中...[/cyan]"),
-        console=console,
-        transient=True,
-    ) as progress:
-        progress.add_task("analyzing")
-        questions = generate_clarifying_questions(prompt, client)
+    logger.info("正在分析需求...")
+    rprint("[dim]正在分析需求...[/dim]")
+    questions = generate_clarifying_questions(prompt, client)
+
+    logger.debug(f"生成了 {len(questions)} 个澄清问题")
 
     if not questions:
+        logger.debug("没有生成问题，使用原始 prompt")
         return prompt
 
     # 显示问题
@@ -192,7 +194,21 @@ def show_help() -> None:
     fw.add_column("desc", style="white")
     fw.add_row("/frameworks, /f", "查看 7 种 Prompt 框架")
     fw.add_row("/history", "查看优化历史")
+    fw.add_row("/clarify", "切换问答式需求确认 (开/关)")
     console.print(fw)
+    console.print()
+
+    # 需求文档
+    rprint("[bold cyan]  需求文档[/bold cyan]")
+    req = Table(show_header=False, box=None, padding=(0, 4))
+    req.add_column("cmd", style="green", width=16)
+    req.add_column("desc", style="white")
+    req.add_row("/docs, /d", "列出所有需求文档")
+    req.add_row("/load, /l <名称>", "加载指定文档")
+    req.add_row("/doc", "显示当前文档")
+    req.add_row("/savedoc <名称>", "创建新文档")
+    req.add_row("/cleardoc", "清除当前文档")
+    console.print(req)
     console.print()
 
     # 配置
@@ -405,9 +421,120 @@ def show_config() -> None:
     rprint(f"  [cyan]温度[/cyan]: {global_config.temperature}")
     rprint(f"  [cyan]历史记录[/cyan]: {'启用' if global_config.enable_history else '禁用'}")
     rprint(f"  [cyan]剪贴板[/cyan]: {'启用' if global_config.auto_clipboard else '禁用'}")
+    rprint(f"  [cyan]问答确认[/cyan]: {'启用' if global_config.enable_clarifying_questions else '禁用'}")
 
     rprint(f"\n[dim]配置文件: ~/.prompt-optimizer/config.json[/dim]")
     rprint("[dim]使用 /provider 切换提供商[/dim]\n")
+
+
+def toggle_clarify() -> None:
+    """切换问答式需求确认功能"""
+    current = global_config.enable_clarifying_questions
+    new_value = not current
+    global_config.update(enable_clarifying_questions=new_value)
+
+    status = "已启用" if new_value else "已禁用"
+    print_success(f"问答式需求确认: [bold]{status}[/bold]")
+
+
+# ==================== 需求文档命令 ====================
+
+def show_docs() -> None:
+    """列出所有需求文档"""
+    manager = get_requirement_manager()
+    docs = manager.list_docs()
+
+    # 获取当前文档
+    current_doc = manager.get_current_doc()
+    current_info = None
+    if current_doc:
+        current_info = {
+            'name': current_doc.name,
+            'file': Path(current_doc.file_path).stem,
+        }
+
+    show_docs_list(docs, current_info)
+
+
+def load_requirement_doc(args: str) -> None:
+    """加载指定文档"""
+    if not args:
+        print_error("请指定文档编号或文件名")
+        rprint("[dim]用法: /load <编号或文件名>[/dim]")
+        rprint("[dim]使用 /docs 查看可用文档[/dim]\n")
+        return
+
+    manager = get_requirement_manager()
+
+    # 判断是否为编号
+    if args.isdigit():
+        docs = manager.list_docs()
+        idx = int(args) - 1
+        if 0 <= idx < len(docs):
+            file_identifier = docs[idx]['file']
+        else:
+            print_error(f"无效编号: {args} (可用 1-{len(docs)})")
+            return
+    else:
+        file_identifier = args
+
+    try:
+        doc = manager.select_doc(file_identifier)
+        print_success(f"已加载: [bold]{doc.name}[/bold]")
+        rprint(f"[dim]优化 Prompt 时将整合此文档内容[/dim]\n")
+    except Exception as e:
+        print_error(f"加载失败: {e}")
+
+
+def show_current_doc() -> None:
+    """显示当前文档"""
+    manager = get_requirement_manager()
+    doc = manager.get_current_doc()
+    show_doc_detail(doc)
+
+
+def clear_current_doc() -> None:
+    """清除当前文档"""
+    manager = get_requirement_manager()
+    manager.clear_current_doc()
+    print_success("已清除当前需求文档")
+
+
+def save_requirement_doc(args: str) -> None:
+    """创建新文档"""
+    if not args:
+        print_error("请指定文档名称")
+        rprint("[dim]用法: /savedoc <名称>[/dim]\n")
+        return
+
+    # 询问文档内容
+    console.print()
+    console.print(Panel(
+        "[bold]创建需求文档[/bold]\n"
+        f"[dim]名称: {args}[/dim]",
+        border_style="cyan",
+        box=box.ROUNDED,
+    ))
+    console.print()
+
+    intro = Prompt.ask("  [cyan]背景介绍[/cyan]", default="")
+    tune = Prompt.ask("  [cyan]调优要求[/cyan]", default="")
+
+    if not intro and not tune:
+        print_warning("内容为空，已取消创建")
+        return
+
+    try:
+        manager = get_requirement_manager()
+        file_path = manager.create_doc(
+            name=args,
+            intro=intro,
+            tune=tune,
+        )
+        print_success(f"文档已创建: {file_path}")
+        rprint("[dim]使用 /load 加载此文档[/dim]\n")
+    except Exception as e:
+        print_error(f"创建失败: {e}")
 
 
 # ==================== 核心功能 ====================
@@ -514,11 +641,26 @@ def generate_optimized_versions(
 
 def optimize_prompt(prompt: str, client) -> None:
     """优化 Prompt"""
+    # 检查是否有加载的需求文档
+    manager = get_requirement_manager()
+    current_doc = manager.get_current_doc()
+
+    # 整合需求文档上下文
+    if current_doc:
+        doc_context = f"""[需求文档上下文]
+文档名称: {current_doc.name}
+背景介绍: {current_doc.intro}
+调优要求: {current_doc.tune}
+"""
+        prompt_with_doc = f"{doc_context}\n[用户原始需求]\n{prompt}"
+    else:
+        prompt_with_doc = prompt
+
     # 询问澄清问题（如果启用）
     if global_config.enable_clarifying_questions:
-        enhanced_prompt = ask_clarifying_questions(prompt, client)
+        enhanced_prompt = ask_clarifying_questions(prompt_with_doc, client)
     else:
-        enhanced_prompt = prompt
+        enhanced_prompt = prompt_with_doc
 
     # 获取推荐框架
     framework = get_recommended_framework(enhanced_prompt)
@@ -696,6 +838,16 @@ def handle_slash_command(input_str: str, client) -> None:
         'config': lambda: show_config(),
         'history': lambda: show_history(),
         'temp': lambda: set_temperature(args, client),
+        'clarify': lambda: toggle_clarify(),
+        # 需求文档命令
+        'docs': lambda: show_docs(),
+        'd': lambda: show_docs(),
+        'load': lambda: load_requirement_doc(args),
+        'l': lambda: load_requirement_doc(args),
+        'doc': lambda: show_current_doc(),
+        'savedoc': lambda: save_requirement_doc(args),
+        'cleardoc': lambda: clear_current_doc(),
+        # 退出
         'quit': lambda: sys.exit(0),
         'q': lambda: sys.exit(0),
         'exit': lambda: sys.exit(0),

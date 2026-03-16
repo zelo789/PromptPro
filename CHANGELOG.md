@@ -1,5 +1,32 @@
 # 更新日志
 
+## [0.5.0] - 2026-03-16
+
+### 新增功能
+
+- **需求文档功能**
+  - 支持自定义需求文档（Markdown 格式）
+  - 文档结构: `name` / `intro` / `tune` 三个字段
+  - 存放在项目 `prompts/` 目录
+  - 新增命令: `/docs`, `/load`, `/doc`, `/savedoc`, `/cleardoc`
+  - 优化 Prompt 时自动整合文档上下文
+
+- **新增模块**
+  - `src/requirement.py` - 需求文档解析和管理
+  - `RequirementDoc` 数据模型
+  - `RequirementParser` 解析器（支持多行块）
+  - `RequirementManager` 管理器
+
+- **异常处理**
+  - 新增错误码 7xx 用于需求文档错误
+  - 新增 `RequirementError` 异常类
+
+### 新增文件
+
+- `src/requirement.py` - 需求文档模块
+- `prompts/example-login.md` - 示例需求文档
+- `tests/test_requirement.py` - 单元测试（16 个测试用例）
+
 ## [0.4.0] - 2026-03-14
 
 ### 品牌更新
