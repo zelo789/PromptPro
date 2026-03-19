@@ -1,8 +1,8 @@
 # PromptPro
 
 <p align="center">
-  <strong>Professional AI Prompt Optimization CLI Tool</strong><br>
-  <em>让 Prompt 更懂 AI</em>
+  <strong>Local-first prompt rewriting CLI</strong><br>
+  <em>把粗糙输入整理成清晰、结构化、可直接交给大模型执行的 Prompt</em>
 </p>
 
 <p align="center">
@@ -25,20 +25,21 @@
   <a href="#quick-start">Quick Start</a> •
   <a href="#installation">Installation</a> •
   <a href="#usage">Usage</a> •
-  <a href="#frameworks">Frameworks</a> •
-  <a href="#configuration">Configuration</a>
+  <a href="#how-it-works">How It Works</a> •
+  <a href="#not-a-fit">Not A Fit</a>
 </p>
 
 ---
 
-## Why PromptPro?
+## What It Is
 
-Writing effective prompts is the key to getting great results from AI models. PromptPro helps you craft better prompts through:
+PromptPro focuses on one job:
 
-- **🎯 Clarifying Questions (核心创新)** - Interactive Q&A to understand your needs before optimization, enabled by default
-- **Intelligent Framework Matching** - Automatically recommends the optimal prompt framework based on your content
-- **Multi-Level Optimization** - Generate light, moderate, and deep optimization versions for comparison
-- **Privacy-First Design** - Runs locally via Ollama, your data never leaves your machine
+- Rewrite rough prompts into clearer, more structured prompts.
+- Stay local-first with Ollama by default, while keeping other providers configurable.
+- Show which parts are rule-based and which parts depend on an LLM response.
+
+It is built for developers and heavy LLM users who prefer a terminal workflow over a SaaS-style prompt builder.
 
 ```
 Input:  "写一个排序算法"
@@ -71,21 +72,36 @@ Versions Generated:
 
 ## Features
 
-### 7 Professional Prompt Frameworks
+### Core Workflow
 
-| Framework | Key Components | Best For |
-|-----------|---------------|----------|
-| **CO-STAR** | Context, Objective, Style, Tone, Audience, Response | Complex tasks, professional content |
-| **RTF** | Role, Task, Format | Simple tasks, quick prototyping |
-| **CREATE** | Character, Request, Examples, Adjustments, Type, Expectations | Creative writing, content creation |
-| **APE** | Action, Purpose, Expectation | Code generation, technical tasks |
-| **BROKE** | Background, Role, Objective, Key Results, Evolution | Business analysis, strategic planning |
-| **RISEN** | Role, Instructions, Steps, End Goal, Narrowing | Multi-step procedures, workflows |
-| **TAG** | Task, Action, Goal | Simple queries, daily conversations |
+- Prompt rewriting in 3 levels: light, moderate, deep.
+- Rule-based framework recommendation for common task types.
+- Optional clarifying questions before optimization.
+- Local history and requirement-doc context injection.
+- Ollama by default, with OpenAI, Claude, and custom OpenAI-compatible endpoints.
 
-### 🎯 Clarifying Questions (核心创新)
+### How It Works
 
-**默认启用** - 在优化前通过 AI 生成针对性问题，帮助澄清需求：
+- Framework recommendation is rule-based keyword matching plus prompt length heuristics.
+- Prompt rewriting itself depends on the configured LLM provider.
+- Requirement docs are local Markdown files injected as extra context before optimization.
+- History is stored locally under `PROMPTPRO_HOME` or `~/.prompt-optimizer`.
+
+### Why It’s Smaller Now
+
+This project no longer presents itself as an all-in-one AI workflow platform. The current product promise is intentionally narrower than before:
+
+- It does not try to be a universal framework expert.
+- It does not claim autonomous requirement understanding.
+- It does not replace a full prompt management or team collaboration product.
+
+## Not A Fit
+
+PromptPro is probably not the right tool if you need:
+
+- A polished SaaS collaboration experience for teams.
+- Enterprise workflow orchestration or knowledge base integration.
+- A no-config GUI-first experience for command-line beginners.
 
 ```
 你的输入: "帮我写一个登录系统"

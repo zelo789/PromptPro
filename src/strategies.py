@@ -29,7 +29,7 @@ Example:
     info = strategy.get_framework_info(PromptFramework.CO_STAR)
     ```
 """
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
@@ -242,43 +242,52 @@ def get_recommended_framework(prompt: str) -> PromptFramework:
     Returns:
         PromptFramework: 推荐的框架
     """
+    framework, _ = get_framework_recommendation(prompt)
+    return framework
+
+
+def get_framework_recommendation(prompt: str) -> Tuple[PromptFramework, str]:
+    """返回推荐框架和推荐原因。"""
     prompt_lower = prompt.lower()
 
-    # 代码/技术类任务 - 使用 APE 框架（优先检查）
-    code_keywords = ['代码', '编程', '函数', '程序', '开发', '技术', 'python', 'javascript', 'java', '算法', '排序', '爬虫']
+    code_keywords = ["代码", "编程", "函数", "程序", "开发", "技术", "python", "javascript", "java", "算法", "排序", "爬虫"]
     if any(word in prompt_lower for word in code_keywords):
-        logger.debug(f"推荐框架：APE (代码/技术类任务)")
-        return PromptFramework.APE
+        logger.debug("推荐框架：APE (代码/技术类任务)")
+        return PromptFramework.APE, "检测到代码/技术关键词"
 
-    # 商业/专业任务 - 使用 BROKE 框架
-    if any(word in prompt_lower for word in ['分析', '报告', '商业', '策略', '规划', '项目']):
-        logger.debug(f"推荐框架：BROKE (商业/专业任务)")
-        return PromptFramework.BROKE
+    if any(word in prompt_lower for word in ["分析", "报告", "商业", "策略", "规划", "项目"]):
+        logger.debug("推荐框架：BROKE (商业/专业任务)")
+        return PromptFramework.BROKE, "检测到商业分析关键词"
 
-    # 多步骤任务 - 使用 RISEN 框架
-    if any(word in prompt_lower for word in ['步骤', '流程', '过程', '顺序', '逐步']):
-        logger.debug(f"推荐框架：RISEN (多步骤任务)")
-        return PromptFramework.RISEN
+    if any(word in prompt_lower for word in ["步骤", "流程", "过程", "顺序", "逐步"]):
+        logger.debug("推荐框架：RISEN (多步骤任务)")
+        return PromptFramework.RISEN, "检测到流程关键词"
 
-    # 创意类任务 - 使用 CREATE 框架
-    creative_keywords = ['创作', '故事', '文案', '诗歌', '广告', '营销', '小说', '剧本', '写']
+    creative_keywords = ["创作", "故事", "文案", "诗歌", "广告", "营销", "小说", "剧本", "写"]
     if any(word in prompt_lower for word in creative_keywords):
-        logger.debug(f"推荐框架：CREATE (创意类任务)")
-        return PromptFramework.CREATE
+        logger.debug("推荐框架：CREATE (创意类任务)")
+        return PromptFramework.CREATE, "检测到创意关键词"
 
-    # 复杂任务 - 使用 CO-STAR 框架
-    if len(prompt) > MAX_PROMPT_LENGTH_FOR_CO_STAR or any(word in prompt_lower for word in ['详细', '完整', '全面', '深入']):
-        logger.debug(f"推荐框架：CO-STAR (复杂任务)")
-        return PromptFramework.CO_STAR
+    if len(prompt) > MAX_PROMPT_LENGTH_FOR_CO_STAR or any(
+        word in prompt_lower for word in ["详细", "完整", "全面", "深入"]
+    ):
+        logger.debug("推荐框架：CO-STAR (复杂任务)")
+        return PromptFramework.CO_STAR, "检测到复杂任务特征"
 
-    # 简单任务 - 使用 RTF 框架
     if len(prompt) < MIN_PROMPT_LENGTH_FOR_RTF:
-        logger.debug(f"推荐框架：RTF (简单任务)")
-        return PromptFramework.RTF
+        logger.debug("推荐框架：RTF (简单任务)")
+        return PromptFramework.RTF, "简短 prompt"
 
-    # 默认 - 使用 TAG 框架
-    logger.debug(f"推荐框架：TAG (默认)")
-    return PromptFramework.TAG
+    logger.debug("推荐框架：TAG (默认)")
+    return PromptFramework.TAG, "通用查询"
+
+
+def get_framework_match_reason(prompt: str, framework: PromptFramework) -> str:
+    """兼容旧接口，返回共享推荐原因。"""
+    recommended, reason = get_framework_recommendation(prompt)
+    if framework == recommended:
+        return reason
+    return f"手动选择 {PROMPT_FRAMEWORKS[framework].name}"
 
 
 # ==================== 优化级别配置 ====================

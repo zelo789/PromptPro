@@ -11,7 +11,12 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from src.config import Config, global_config
 from src.ollama_client import LLMClient
 from src.history import HistoryManager, global_history
-from src.strategies import PromptFramework, PROMPT_FRAMEWORKS, get_recommended_framework
+from src.strategies import (
+    PromptFramework,
+    PROMPT_FRAMEWORKS,
+    get_recommended_framework,
+    get_framework_match_reason,
+)
 from src.ui import (
     console,
     print_error,
@@ -201,39 +206,6 @@ def handle_temperature_command(client, config: Config) -> None:
             print_error("温度必须在 0.0 到 2.0 之间")
     except ValueError:
         print_error(f"无效的温度值：{value}")
-
-
-def get_framework_match_reason(prompt_text: str, framework: PromptFramework) -> str:
-    """获取框架匹配原因"""
-    prompt_lower = prompt_text.lower()
-
-    # 代码/技术类任务
-    code_keywords = ['代码', '编程', '函数', '程序', '开发', '技术', 'python', 'javascript', 'java', '算法', '排序', '爬虫']
-    if any(word in prompt_lower for word in code_keywords):
-        return "检测到代码/技术关键词 → APE 适合行动导向任务"
-
-    # 商业/专业任务
-    if any(word in prompt_lower for word in ['分析', '报告', '商业', '策略', '规划', '项目']):
-        return "检测到商业分析关键词 → BROKE 适合结果导向任务"
-
-    # 多步骤任务
-    if any(word in prompt_lower for word in ['步骤', '流程', '过程', '顺序', '逐步']):
-        return "检测到流程关键词 → RISEN 适合多步骤任务"
-
-    # 创意类任务
-    creative_keywords = ['创作', '故事', '文案', '诗歌', '广告', '营销', '小说', '剧本', '写']
-    if any(word in prompt_lower for word in creative_keywords):
-        return "检测到创意关键词 → CREATE 适合内容创作"
-
-    # 复杂任务
-    if len(prompt_text) > 50 or any(word in prompt_lower for word in ['详细', '完整', '全面', '深入']):
-        return "检测到复杂任务特征 → CO-STAR 提供全面上下文"
-
-    # 简单任务
-    if len(prompt_text) < 20:
-        return "简短 prompt → RTF 快速三要素优化"
-
-    return "通用查询 → TAG 简洁高效"
 
 
 def select_framework(prompt_text: str) -> Optional[PromptFramework]:

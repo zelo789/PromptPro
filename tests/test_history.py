@@ -5,6 +5,7 @@ import pytest
 import json
 import os
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import patch, mock_open
 
 from src.history import HistoryManager, HistoryItem
@@ -53,12 +54,11 @@ class TestHistoryManager:
     def history_manager(self, temp_history_file):
         """历史管理器"""
         from src.config import Config
-        config = Config()
+        config = Config(config_dir=str(Path(temp_history_file).parent))
         manager = HistoryManager(config)
         # 直接设置 history_file 属性（它是实例属性）
         manager.history_file = temp_history_file
         manager.enabled = True
-        manager._ensure_history_file()
         return manager
 
     def test_add_history_item(self, history_manager):
@@ -115,3 +115,11 @@ class TestHistoryManager:
 
         items = history_manager.get_all()
         assert len(items) == 0
+
+    def test_init_does_not_create_history_file(self, tmp_path):
+        from src.config import Config
+
+        history_file = tmp_path / "history.json"
+        manager = HistoryManager(Config(config_dir=str(tmp_path)))
+        manager.history_file = str(history_file)
+        assert not history_file.exists()

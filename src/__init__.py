@@ -13,10 +13,10 @@ PromptPro - 让 Prompt 更懂 AI
 __version__ = "0.4.0"
 __author__ = "PromptPro Team"
 
-from src.config import Config, global_config
+from src.config import Config, global_config, get_config
 from src.ollama_client import LLMClient, OllamaClient
 from src.optimizer import PromptOptimizer
-from src.history import HistoryManager, global_history
+from src.history import HistoryManager, global_history, get_history_manager
 from src.exceptions import (
     PromptProError,
     ConfigError,
@@ -31,11 +31,13 @@ from src.exceptions import (
 __all__ = [
     "Config",
     "global_config",
+    "get_config",
     "LLMClient",
     "OllamaClient",  # 向后兼容别名
     "PromptOptimizer",
     "HistoryManager",
     "global_history",
+    "get_history_manager",
     "PromptProError",
     "ConfigError",
     "ConnectionError",

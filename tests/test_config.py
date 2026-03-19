@@ -4,10 +4,12 @@
 import pytest
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch, mock_open
 
-from src.config import Config, CONFIG_VERSION
+from src.config import Config, CONFIG_VERSION, resolve_config_dir
 
 
 class TestConfig:
@@ -15,7 +17,7 @@ class TestConfig:
 
     def test_default_config(self):
         """测试默认配置"""
-        config = Config()
+        config = Config(config_dir="/tmp/promptpro-test-config")
         assert config.ollama_base_url == "http://localhost:11434"
         assert config.default_model == ""
         assert config.request_timeout == 300
@@ -24,6 +26,7 @@ class TestConfig:
         assert config.num_versions == 3
         assert config.enable_history is True
         assert config.auto_clipboard is True
+        assert config.config_dir == "/tmp/promptpro-test-config"
 
     def test_config_validation_valid(self):
         """测试有效配置验证"""
@@ -95,3 +98,22 @@ class TestConfigFile:
         config = Config()
         assert config.history_file.endswith("history.json")
         assert ".prompt-optimizer" in config.history_file
+
+    def test_promptpro_home_env_override(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("PROMPTPRO_HOME", str(tmp_path / "promptpro-home"))
+        assert resolve_config_dir() == tmp_path / "promptpro-home"
+
+    def test_import_has_no_filesystem_side_effect(self, tmp_path):
+        home_dir = tmp_path / "home"
+        home_dir.mkdir()
+        result = subprocess.run(
+            [sys.executable, "-c", "import src.config, src.history, src.strategies"],
+            cwd=Path(__file__).resolve().parents[1],
+            env={**os.environ, "HOME": str(home_dir), "PROMPTPRO_HOME": str(home_dir / 'pp-home')},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert not (home_dir / ".prompt-optimizer").exists()
+        assert not (home_dir / "pp-home").exists()

@@ -2,7 +2,8 @@
 配置管理模块
 
 提供全局配置管理功能，支持多种 LLM API 提供商。
-配置文件位置：~/.prompt-optimizer/config.json
+默认配置文件位置：~/.prompt-optimizer/config.json
+可通过 PROMPTPRO_HOME 覆盖配置目录。
 """
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Any, Optional, ClassVar
@@ -18,6 +19,16 @@ logger = get_logger("config")
 
 # 配置版本号，用于迁移
 CONFIG_VERSION = 3
+DEFAULT_APP_DIRNAME = ".prompt-optimizer"
+PROMPTPRO_HOME_ENV = "PROMPTPRO_HOME"
+
+
+def resolve_config_dir() -> Path:
+    """解析配置目录，优先使用环境变量。"""
+    custom_home = os.environ.get(PROMPTPRO_HOME_ENV)
+    if custom_home:
+        return Path(custom_home).expanduser()
+    return Path.home() / DEFAULT_APP_DIRNAME
 
 
 @dataclass
@@ -81,7 +92,7 @@ class Config:
     log_level: str = "INFO"
 
     # 路径配置
-    config_dir: str = field(default_factory=lambda: str(Path.home() / ".prompt-optimizer"))
+    config_dir: str = field(default_factory=lambda: str(resolve_config_dir()))
 
     # 验证规则
     _validators: ClassVar[Dict[str, Any]] = {
@@ -94,9 +105,6 @@ class Config:
         "log_level": {"choices": ["DEBUG", "INFO", "WARNING", "ERROR"]},
         "provider": {"choices": ["ollama", "openai", "claude", "custom"]},
     }
-
-    def __post_init__(self) -> None:
-        os.makedirs(self.config_dir, exist_ok=True)
 
     @property
     def config_file(self) -> str:
@@ -127,6 +135,8 @@ class Config:
         return len(self.validate()) == 0
 
     def save(self) -> None:
+        os.makedirs(self.config_dir, exist_ok=True)
+
         if os.path.exists(self.config_file):
             backup_file = self.config_file + ".bak"
             try:
@@ -150,8 +160,9 @@ class Config:
             raise ConfigError(f"保存配置文件失败：{e}")
 
     @classmethod
-    def load(cls) -> "Config":
-        config_file = str(Path.home() / ".prompt-optimizer" / "config.json")
+    def load(cls, config_dir: Optional[str] = None) -> "Config":
+        resolved_dir = Path(config_dir).expanduser() if config_dir else resolve_config_dir()
+        config_file = str(resolved_dir / "config.json")
 
         if os.path.exists(config_file):
             try:
@@ -159,6 +170,7 @@ class Config:
                     config_data = json.load(f)
 
                 config_data = cls._migrate_config(config_data)
+                config_data["config_dir"] = str(resolved_dir)
                 logger.info(f"配置已加载：{config_file}")
                 return cls(**config_data)
 
@@ -170,7 +182,7 @@ class Config:
                 raise ConfigError(f"配置文件内容无效：{e}")
 
         logger.debug("配置文件不存在，使用默认配置")
-        return cls()
+        return cls(config_dir=str(resolved_dir))
 
     @classmethod
     def _migrate_config(cls, config_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -207,7 +219,7 @@ class Config:
         # 过滤无效字段
         return {k: v for k, v in config_data.items() if k in valid_fields}
 
-    def update(self, **kwargs: Any) -> List[str]:
+    def update(self, save: bool = True, **kwargs: Any) -> List[str]:
         unknown_keys = []
         for key, value in kwargs.items():
             if hasattr(self, key):
@@ -216,14 +228,15 @@ class Config:
             else:
                 unknown_keys.append(key)
 
-        self.save()
+        if save:
+            self.save()
         return unknown_keys
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
     def reset(self) -> None:
-        default_config = Config()
+        default_config = Config(config_dir=self.config_dir)
         for field_name in self.__dataclass_fields__:
             if field_name != "config_dir":
                 setattr(self, field_name, getattr(default_config, field_name))
@@ -264,6 +277,28 @@ class Config:
             return self.custom_base_url
         return ""
 
+_global_config: Optional[Config] = None
 
-# 全局配置单例
-global_config = Config.load()
+
+def get_config(force_reload: bool = False) -> Config:
+    """懒加载全局配置实例。"""
+    global _global_config
+    if force_reload or _global_config is None:
+        _global_config = Config.load()
+    return _global_config
+
+
+class LazyConfigProxy:
+    """向后兼容的懒加载配置代理。"""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(get_config(), name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(get_config(), name, value)
+
+    def __repr__(self) -> str:
+        return repr(get_config())
+
+
+global_config = LazyConfigProxy()

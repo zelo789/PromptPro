@@ -34,10 +34,18 @@ from src.config import Config, global_config
 from src.ollama_client import LLMClient
 from src.optimizer import PromptOptimizer
 from src.history import global_history
-from src.strategies import PromptFramework, LEVEL_CONFIGS, OptimizationLevel, PROMPT_FRAMEWORKS, get_recommended_framework
+from src.strategies import (
+    PromptFramework,
+    LEVEL_CONFIGS,
+    OptimizationLevel,
+    PROMPT_FRAMEWORKS,
+    get_recommended_framework,
+    get_framework_match_reason,
+)
 from src.logger import setup_logging, get_logger
 from src.exceptions import PromptProError
 from src.requirement import get_requirement_manager, RequirementDoc
+from src.app import PromptOptimizationRequest, PromptOptimizationService
 
 from src.ui import (
     console,
@@ -539,33 +547,6 @@ def save_requirement_doc(args: str) -> None:
 
 # ==================== 核心功能 ====================
 
-def get_framework_match_reason(prompt_text: str, framework: PromptFramework) -> str:
-    """获取框架匹配原因"""
-    prompt_lower = prompt_text.lower()
-
-    code_keywords = ['代码', '编程', '函数', '程序', '开发', '技术', 'python', 'javascript', 'java', '算法', '排序', '爬虫']
-    if any(word in prompt_lower for word in code_keywords):
-        return "检测到代码/技术关键词"
-
-    if any(word in prompt_lower for word in ['分析', '报告', '商业', '策略', '规划', '项目']):
-        return "检测到商业分析关键词"
-
-    if any(word in prompt_lower for word in ['步骤', '流程', '过程', '顺序', '逐步']):
-        return "检测到流程关键词"
-
-    creative_keywords = ['创作', '故事', '文案', '诗歌', '广告', '营销', '小说', '剧本', '写']
-    if any(word in prompt_lower for word in creative_keywords):
-        return "检测到创意关键词"
-
-    if len(prompt_text) > 50 or any(word in prompt_lower for word in ['详细', '完整', '全面', '深入']):
-        return "检测到复杂任务特征"
-
-    if len(prompt_text) < 20:
-        return "简短 prompt"
-
-    return "通用查询"
-
-
 def generate_optimized_versions(
     prompt: str,
     client,
@@ -641,37 +622,28 @@ def generate_optimized_versions(
 
 def optimize_prompt(prompt: str, client) -> None:
     """优化 Prompt"""
-    # 检查是否有加载的需求文档
     manager = get_requirement_manager()
     current_doc = manager.get_current_doc()
+    service = PromptOptimizationService(client=client, history_manager=global_history)
+    prompt_with_doc = service.build_effective_prompt(prompt, requirement_doc=current_doc)
 
-    # 整合需求文档上下文
-    if current_doc:
-        doc_context = f"""[需求文档上下文]
-文档名称: {current_doc.name}
-背景介绍: {current_doc.intro}
-调优要求: {current_doc.tune}
-"""
-        prompt_with_doc = f"{doc_context}\n[用户原始需求]\n{prompt}"
-    else:
-        prompt_with_doc = prompt
-
-    # 询问澄清问题（如果启用）
     if global_config.enable_clarifying_questions:
         enhanced_prompt = ask_clarifying_questions(prompt_with_doc, client)
     else:
         enhanced_prompt = prompt_with_doc
 
-    # 获取推荐框架
-    framework = get_recommended_framework(enhanced_prompt)
-    reason = get_framework_match_reason(enhanced_prompt, framework)
-    fw_info = PROMPT_FRAMEWORKS[framework]
+    result = service.optimize(
+        PromptOptimizationRequest(
+            original_prompt=prompt,
+            num_versions=3,
+            requirement_doc=current_doc,
+            clarified_prompt=enhanced_prompt,
+        )
+    )
+    fw_info = PROMPT_FRAMEWORKS[result.framework]
 
-    # 显示推荐
-    rprint(f"\n[dim]推荐框架: [cyan]{fw_info.name}[/cyan] ({reason})[/dim]\n")
-
-    # 生成优化版本
-    results = generate_optimized_versions(enhanced_prompt, client, num_versions=3, framework=framework)
+    rprint(f"\n[dim]推荐框架: [cyan]{fw_info.name}[/cyan] ({result.framework_reason})[/dim]\n")
+    results = result.optimized_prompts
 
     if not results:
         print_error("优化失败，请重试")
@@ -680,14 +652,8 @@ def optimize_prompt(prompt: str, client) -> None:
     # 显示结果
     show_optimized_versions(results)
 
-    # 保存历史
     if global_config.enable_history:
-        global_history.add(
-            original_prompt=prompt,
-            optimized_prompts=results,
-            framework=framework.value,
-            model=client.get_current_model(),
-        )
+        service.save_history(result)
 
     # 选择复制
     choice = Prompt.ask("\n[cyan]输入版本号复制[/cyan] [dim](1-4)[/dim]", default="")
@@ -903,7 +869,8 @@ def quick_optimize(
 
     rprint(f"[dim]提供商: [green]{provider_name}[/green] | 模型: [green]{client.get_current_model()}[/green][/dim]\n")
 
-    # 优化
+    service = PromptOptimizationService(client=client, history_manager=global_history)
+
     if framework:
         try:
             fw = PromptFramework(framework.lower())
@@ -915,19 +882,20 @@ def quick_optimize(
     reason = get_framework_match_reason(prompt, fw)
     rprint(f"[dim]框架: [cyan]{PROMPT_FRAMEWORKS[fw].name}[/cyan] ({reason})[/dim]\n")
 
-    results = generate_optimized_versions(prompt, client, num_versions=level, framework=fw)
+    result = service.optimize(
+        PromptOptimizationRequest(
+            original_prompt=prompt,
+            num_versions=level,
+            selected_framework=fw,
+        )
+    )
+    results = result.optimized_prompts
 
     if results:
         show_optimized_versions(results)
 
-        # 保存历史
         if global_config.enable_history:
-            global_history.add(
-                original_prompt=prompt,
-                optimized_prompts=results,
-                framework=fw.value,
-                model=client.get_current_model(),
-            )
+            service.save_history(result)
 
         # 输出到文件
         if output:

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "promptpro"
 version = "0.4.0"
-description = "PromptPro - 让 Prompt 更懂 AI | 专业的 Prompt 优化 CLI 工具"
+description = "Local-first CLI for rewriting rough prompts into clearer structured prompts"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
