@@ -83,6 +83,18 @@ class TestConfig:
         # 版本号会被设置
         assert "version" in migrated
 
+    def test_config_migration_preserves_default_factory_fields(self):
+        """测试迁移时 default_factory 字段被正确填充"""
+        migrated = Config._migrate_config({})
+        assert migrated["version"] == CONFIG_VERSION
+        assert migrated["optimization_dimensions"] == [
+            "structure",
+            "clarity",
+            "context",
+            "constraints",
+            "examples",
+        ]
+
 
 class TestConfigFile:
     """配置文件测试"""

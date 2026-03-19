@@ -30,7 +30,7 @@ def _fix_windows_encoding() -> None:
         _encoding_fixed = True
 
 
-from src.config import Config, global_config
+from src.config import Config, global_config, get_display_config_file
 from src.ollama_client import LLMClient
 from src.optimizer import PromptOptimizer
 from src.history import global_history
@@ -282,7 +282,7 @@ def show_providers() -> None:
         rprint(f"       [dim]{url}[/dim]{status}")
 
     rprint(f"\n[dim]使用 /provider <名称> 切换提供商[/dim]")
-    rprint("[dim]配置文件: ~/.prompt-optimizer/config.json[/dim]\n")
+    rprint(f"[dim]配置文件: {get_display_config_file()}[/dim]\n")
 
 
 def switch_provider(args: str) -> None:
@@ -431,7 +431,7 @@ def show_config() -> None:
     rprint(f"  [cyan]剪贴板[/cyan]: {'启用' if global_config.auto_clipboard else '禁用'}")
     rprint(f"  [cyan]问答确认[/cyan]: {'启用' if global_config.enable_clarifying_questions else '禁用'}")
 
-    rprint(f"\n[dim]配置文件: ~/.prompt-optimizer/config.json[/dim]")
+    rprint(f"\n[dim]配置文件: {get_display_config_file()}[/dim]")
     rprint("[dim]使用 /provider 切换提供商[/dim]\n")
 
 
@@ -854,6 +854,8 @@ def quick_optimize(
 
         if model and model in models:
             client.set_model(model)
+        elif global_config.default_model and global_config.default_model in models:
+            client.set_model(global_config.default_model)
         else:
             client.set_model(models[0])
     else:

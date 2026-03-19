@@ -5,7 +5,7 @@
 默认配置文件位置：~/.prompt-optimizer/config.json
 可通过 PROMPTPRO_HOME 覆盖配置目录。
 """
-from dataclasses import dataclass, field, asdict
+from dataclasses import MISSING, dataclass, field, asdict
 from typing import List, Dict, Any, Optional, ClassVar
 import json
 import os
@@ -29,6 +29,12 @@ def resolve_config_dir() -> Path:
     if custom_home:
         return Path(custom_home).expanduser()
     return Path.home() / DEFAULT_APP_DIRNAME
+
+
+def get_display_config_file(config: Optional["Config"] = None) -> str:
+    """返回当前生效的配置文件路径。"""
+    current = config or get_config()
+    return current.config_file
 
 
 @dataclass
@@ -187,37 +193,36 @@ class Config:
     @classmethod
     def _migrate_config(cls, config_data: Dict[str, Any]) -> Dict[str, Any]:
         version = config_data.get("version", 1)
+        migrated = dict(config_data)
+        valid_fields = cls.__dataclass_fields__
 
-        valid_fields = {name for name in cls.__dataclass_fields__}
+        if version < 2:
+            logger.info("正在迁移配置从 v1 到 v2...")
+            for field_name, field_info in valid_fields.items():
+                if field_name in migrated:
+                    continue
+                if field_info.default is not MISSING:
+                    migrated[field_name] = field_info.default
+                elif field_info.default_factory is not MISSING:
+                    migrated[field_name] = field_info.default_factory()
+            migrated["version"] = 2
+            version = 2
 
-        # v2 -> v3: 添加多 API 提供商支持
         if version < 3:
             logger.info("正在迁移配置从 v2 到 v3...")
-            config_data["provider"] = "ollama"
-            config_data["openai_api_key"] = ""
-            config_data["openai_base_url"] = "https://api.openai.com/v1"
-            config_data["openai_model"] = "gpt-4o-mini"
-            config_data["claude_api_key"] = ""
-            config_data["claude_base_url"] = "https://api.anthropic.com"
-            config_data["claude_model"] = "claude-3-5-sonnet-20241022"
-            config_data["custom_api_key"] = ""
-            config_data["custom_base_url"] = ""
-            config_data["custom_model"] = ""
-            config_data["version"] = CONFIG_VERSION
+            migrated.setdefault("provider", "ollama")
+            migrated.setdefault("openai_api_key", "")
+            migrated.setdefault("openai_base_url", "https://api.openai.com/v1")
+            migrated.setdefault("openai_model", "gpt-4o-mini")
+            migrated.setdefault("claude_api_key", "")
+            migrated.setdefault("claude_base_url", "https://api.anthropic.com")
+            migrated.setdefault("claude_model", "claude-3-5-sonnet-20241022")
+            migrated.setdefault("custom_api_key", "")
+            migrated.setdefault("custom_base_url", "")
+            migrated.setdefault("custom_model", "")
+            migrated["version"] = CONFIG_VERSION
 
-        # v1 -> v2
-        if version < 2:
-            for field_name in valid_fields:
-                if field_name not in config_data:
-                    field_info = cls.__dataclass_fields__[field_name]
-                    default_value = field_info.default
-                    if default_value is not None and callable(default_value):
-                        default_value = field_info.default_factory()
-                    config_data[field_name] = default_value
-            config_data["version"] = 2
-
-        # 过滤无效字段
-        return {k: v for k, v in config_data.items() if k in valid_fields}
+        return {k: v for k, v in migrated.items() if k in valid_fields}
 
     def update(self, save: bool = True, **kwargs: Any) -> List[str]:
         unknown_keys = []

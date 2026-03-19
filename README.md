@@ -103,55 +103,6 @@ PromptPro is probably not the right tool if you need:
 - Enterprise workflow orchestration or knowledge base integration.
 - A no-config GUI-first experience for command-line beginners.
 
-```
-你的输入: "帮我写一个登录系统"
-
-┌─ 需求澄清 ─────────────────────────────────────┐
-│  为了更好地优化，请回答以下问题：               │
-│  （按回车跳过，输入 'skip' 跳过所有）           │
-│                                                │
-│  1. 登录方式有哪些？（账号密码/手机/第三方）     │
-│     回答: 账号密码 + 微信登录                   │
-│                                                │
-│  2. 需要什么技术栈？                           │
-│     回答: Python Flask + JWT                  │
-│                                                │
-│  3. 有安全要求吗？                             │
-│     回答: 需要防暴力破解，密码加密存储          │
-└────────────────────────────────────────────────┘
-
-→ 整合后的 Prompt 包含完整需求信息
-→ 生成的优化版本更加精准
-```
-
-**如何开关：**
-- 交互模式输入 `/clarify` 切换开/关
-- 配置文件设置 `enable_clarifying_questions: true/false`
-
-### 3 Optimization Levels
-
-- **Light** - Clarity improvements only, preserves original structure
-- **Moderate** - Adds structure, clarity, and context
-- **Deep** - Full optimization with all dimensions
-
-### Multi-Provider Support
-
-- **Ollama** (default) - Local, privacy-focused
-- **OpenAI API** - GPT-4, GPT-3.5
-- **Claude API** - Claude 3.5 Sonnet, Claude 3 Opus
-- **Custom API** - Any OpenAI-compatible endpoint
-
-### Additional Features
-
-- Smart framework recommendation based on content analysis
-- **Requirement Documents** - Custom requirement docs for project context
-- History management with search and export
-- Cross-platform clipboard support
-- Interactive and command-line modes
-- Configurable temperature and model parameters
-
----
-
 ## Quick Start
 
 ### Prerequisites
@@ -243,8 +194,8 @@ pp --config
 # View history
 pp --history
 
-# Specify provider (via config)
-# Edit ~/.prompt-optimizer/config.json
+# Override config directory
+export PROMPTPRO_HOME=/path/to/promptpro-home
 ```
 
 ### Interactive Commands
@@ -275,7 +226,7 @@ In interactive mode, enter a number to quickly switch models:
 > 2  # Switch to second model
 ```
 
-### 📄 Requirement Documents
+### Requirement Documents
 
 Create custom requirement documents to provide project context for prompt optimization.
 
@@ -301,123 +252,6 @@ tune: |
 ```
 
 When a document is loaded, its context is automatically integrated into prompt optimization.
-
----
-
-## Architecture
-
-### Core Workflow
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        PromptPro 优化流程                             │
-└─────────────────────────────────────────────────────────────────────┘
-
-用户输入 Prompt
-       │
-       ▼
-┌──────────────────┐
-│ 🎯 需求澄清阶段   │  ◀── 核心创新（默认启用）
-│ (Clarifying Q&A) │
-└──────────────────┘
-       │
-       │  AI 生成 3-5 个针对性问题
-       │  用户回答补充需求细节
-       │  整合为增强后的 Prompt
-       ▼
-┌──────────────────┐
-│ 📊 框架推荐阶段   │
-│ (Framework Match)│
-└──────────────────┘
-       │
-       │  分析关键词和内容特征
-       │  智能匹配最佳框架
-       ▼
-┌──────────────────┐
-│ ⚡ 多级优化阶段   │
-│ (Optimization)   │
-└──────────────────┘
-       │
-       ├─→ Light 版本   (清晰度优化)
-       ├─→ Moderate 版本 (结构+上下文)
-       ├─→ Deep 版本    (全面优化)
-       └─→ Framework 版本 (框架应用)
-       │
-       ▼
-┌──────────────────┐
-│ 📋 结果输出       │
-│ • 终端展示        │
-│ • 剪贴板复制      │
-│ • 历史记录        │
-└──────────────────┘
-```
-
-### Framework Selection Logic
-
-```
-Enhanced Prompt (增强后的 Prompt)
-    │
-    ├─ Contains code/technical keywords? ────→ APE Framework
-    │
-    ├─ Contains analysis/report/strategy? ───→ BROKE Framework
-    │
-    ├─ Contains steps/process/workflow? ────→ RISEN Framework
-    │
-    ├─ Contains creative/writing/story? ─────→ CREATE Framework
-    │
-    ├─ Long or requires detailed output? ────→ CO-STAR Framework
-    │
-    ├─ Short and simple (<20 chars)? ────────→ RTF Framework
-    │
-    └─ Other simple queries ─────────────────→ TAG Framework
-```
-
-### Framework Details
-
-#### CO-STAR Framework
-**Best for:** Complex tasks requiring comprehensive context
-
-Components:
-- **C**ontext - Background information
-- **O**bjective - Clear goal definition
-- **S**tyle - Writing style specification
-- **T**one - Emotional tone setting
-- **A**udience - Target reader definition
-- **R**esponse - Expected output format
-
-#### APE Framework
-**Best for:** Code generation, technical tasks
-
-Components:
-- **A**ction - Specific action to perform
-- **P**urpose - Intent and objective
-- **E**xpectation - Expected results and standards
-
-#### CREATE Framework
-**Best for:** Creative writing, content generation
-
-Components:
-- **C**haracter - AI role definition
-- **R**equest - Task specification
-- **E**xamples - Reference examples
-- **A**djustments - Optimization direction
-- **T**ype - Content type
-- **E**xpectations - Desired outcomes
-
----
-
-## Configuration
-
-Configuration file: `~/.prompt-optimizer/config.json`
-
-### 🔐 API Key 配置（推荐环境变量）
-
-**安全最佳实践**：使用环境变量存储 API Key，避免写入配置文件。
-
-```bash
-# Linux/macOS - 添加到 ~/.bashrc 或 ~/.zshrc
-export OPENAI_API_KEY="sk-your-key"
-export CLAUDE_API_KEY="sk-ant-your-key"
 
 # Windows PowerShell
 $env:OPENAI_API_KEY = "sk-your-key"
@@ -479,31 +313,16 @@ cp .env.example .env
 
 项目提供示例配置文件：
 
+Use `PROMPTPRO_HOME` to choose where config and history are stored, then run the CLI once to create files on demand:
+
 ```bash
-# Ollama 本地
-cp examples/config.ollama.json ~/.prompt-optimizer/config.json
-
-# OpenAI
-cp examples/config.openai.json ~/.prompt-optimizer/config.json
-
-# Claude
-cp examples/config.claude.json ~/.prompt-optimizer/config.json
+export PROMPTPRO_HOME="$HOME/.promptpro"
+pp --config
 ```
 
-### Switching Providers
+You can switch providers by editing the generated config file or using the interactive command:
 
-Edit `~/.prompt-optimizer/config.json`:
-
-```json
-{
-  "provider": "openai",
-  "openai_model": "gpt-4o-mini"
-}
-```
-
-Or use the interactive command:
-
-```
+```text
 > /provider openai
 ```
 

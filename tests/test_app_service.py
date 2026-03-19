@@ -18,6 +18,19 @@ class FakeClient:
         return "fake-model"
 
 
+class FlakyClient(FakeClient):
+    def __init__(self, failures):
+        super().__init__()
+        self.failures = failures
+
+    def chat(self, messages):
+        self.calls.append(messages)
+        call_no = len(self.calls)
+        if call_no in self.failures:
+            raise RuntimeError(f"boom-{call_no}")
+        return f"optimized::{call_no}"
+
+
 class FakeHistory:
     def __init__(self):
         self.saved = []
@@ -75,3 +88,19 @@ def test_service_saves_history():
 
     assert len(history.saved) == 1
     assert history.saved[0]["framework"] == result.framework.value
+
+
+def test_service_keeps_successful_versions_when_some_calls_fail():
+    client = FlakyClient(failures={2})
+    service = PromptOptimizationService(client=client)
+
+    result = service.optimize(
+        PromptOptimizationRequest(
+            original_prompt="写一个 Python 排序函数",
+            num_versions=2,
+        )
+    )
+
+    assert len(result.optimized_prompts) == 2
+    assert result.optimized_prompts[0]["level"] == "light"
+    assert result.optimized_prompts[1]["level"] == "framework"

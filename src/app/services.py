@@ -68,15 +68,18 @@ class PromptOptimizationService:
                 {"role": "system", "content": config["system_prompt"]},
                 {"role": "user", "content": f"请优化以下 prompt:\n\n{prompt}"},
             ]
-            optimized = self.client.chat(messages)
-            results.append(
-                {
-                    "level": level.value,
-                    "name": level_names[level],
-                    "description": config["description"],
-                    "prompt": optimized,
-                }
-            )
+            try:
+                optimized = self.client.chat(messages)
+                results.append(
+                    {
+                        "level": level.value,
+                        "name": level_names[level],
+                        "description": config["description"],
+                        "prompt": optimized,
+                    }
+                )
+            except Exception as exc:
+                logger.warning("生成 %s 版本失败: %s", level_names[level], exc)
 
         if framework:
             fw_info = PROMPT_FRAMEWORKS[framework]
@@ -84,15 +87,18 @@ class PromptOptimizationService:
                 {"role": "system", "content": fw_info.system_prompt},
                 {"role": "user", "content": f"请优化以下 prompt:\n\n{prompt}"},
             ]
-            optimized = self.client.chat(messages)
-            results.append(
-                {
-                    "level": "framework",
-                    "name": fw_info.name,
-                    "description": fw_info.description,
-                    "prompt": optimized,
-                }
-            )
+            try:
+                optimized = self.client.chat(messages)
+                results.append(
+                    {
+                        "level": "framework",
+                        "name": fw_info.name,
+                        "description": fw_info.description,
+                        "prompt": optimized,
+                    }
+                )
+            except Exception as exc:
+                logger.warning("生成 %s 版本失败: %s", fw_info.name, exc)
 
         return results
 
