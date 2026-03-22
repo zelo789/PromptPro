@@ -1,0 +1,10 @@
+{
+  "provider": "ollama",
+  "ollama_base_url": "http://localhost:11434",
+  "default_model": "",
+  "temperature": 0.7,
+  "enable_history": true,
+  "max_history_items": 100,
+  "auto_clipboard": true,
+  "enable_clarifying_questions": true
+}

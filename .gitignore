@@ -17,6 +17,7 @@ ENV/
 *.swo
 *~
 .DS_Store
+.claude/
 
 # Build / Distribution
 build/
@@ -30,6 +31,8 @@ dist/
 .coverage
 htmlcov/
 coverage.xml
+.tmp_siliconflow/
+.tmp_siliconflow_recheck/
 
 # Project specific
 *.tmp

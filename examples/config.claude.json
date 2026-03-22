@@ -1,0 +1,11 @@
+{
+  "provider": "claude",
+  "claude_api_key": "${CLAUDE_API_KEY}",
+  "claude_base_url": "https://api.anthropic.com",
+  "claude_model": "claude-3-5-sonnet-20241022",
+  "temperature": 0.7,
+  "enable_history": true,
+  "max_history_items": 100,
+  "auto_clipboard": true,
+  "enable_clarifying_questions": true
+}

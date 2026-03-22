@@ -1,59 +1,117 @@
-"""CLI 行为测试。"""
+﻿"""Regression tests for CLI orchestration helpers."""
 
-from src import cli
+from pathlib import Path
+
+import src.cli as cli
 from src.config import Config
 
 
-class FakeLLMClient:
-    def __init__(self, config):
-        self.config = config
-        self.model = ""
+class DummyClient:
+    def __init__(self, models=None, current_model="", connected=True):
+        self.models = models or []
+        self.current_model = current_model
+        self.connected = connected
+        self.temperature = 0.7
+        self.set_model_calls = []
+        self.chat_responses = []
+        self.chat_calls = []
 
     def check_connection(self):
-        return True
+        return self.connected
 
     def list_models(self):
-        return ["model-a", "model-b"]
+        return self.models
+
+    def get_available_models(self):
+        return self.models
 
     def set_model(self, model):
-        self.model = model
+        self.current_model = model
+        self.set_model_calls.append(model)
+        return True
 
     def get_current_model(self):
-        return self.model
+        return self.current_model
+
+    def set_temperature(self, temperature):
+        self.temperature = temperature
+
+    def chat(self, messages):
+        self.chat_calls.append(messages)
+        if self.chat_responses:
+            return self.chat_responses.pop(0)
+        return "optimized"
 
 
-def test_quick_optimize_prefers_configured_default_model(monkeypatch, tmp_path):
-    config = Config(config_dir=str(tmp_path), default_model="model-b")
+def test_generate_clarifying_questions_strips_numbering_and_comments():
+    client = DummyClient()
+    client.chat_responses = ["1. Who is the audience?\n2) What constraints matter?\n# ignored"]
 
-    captured = {}
+    result = cli.generate_clarifying_questions("Improve this prompt", client)
 
-    class FakeService:
-        def __init__(self, client, history_manager):
-            captured["client"] = client
+    assert result == ["Who is the audience?", "What constraints matter?"]
 
-        def optimize(self, request):
-            captured["request"] = request
-            return type(
-                "Result",
-                (),
-                {
-                    "optimized_prompts": [{"name": "轻度优化", "prompt": "done"}],
-                    "framework": request.selected_framework,
-                    "framework_reason": "手动选择",
-                    "model": captured["client"].get_current_model(),
-                    "original_prompt": request.original_prompt,
-                },
-            )()
 
-        def save_history(self, result):
-            captured["saved"] = result
+def test_connect_client_uses_requested_ollama_model_when_available(monkeypatch):
+    monkeypatch.setattr(cli.global_config, "provider", "ollama")
+    monkeypatch.setattr(cli.global_config, "default_model", "llama3")
+    client = DummyClient(models=["qwen2", "llama3"], connected=True)
 
-    monkeypatch.setattr(cli, "LLMClient", FakeLLMClient)
-    monkeypatch.setattr(cli, "PromptOptimizationService", FakeService)
-    monkeypatch.setattr(cli, "show_optimized_versions", lambda results: captured.setdefault("shown", results))
-    monkeypatch.setattr(cli, "print_error", lambda message: (_ for _ in ()).throw(AssertionError(message)))
-    monkeypatch.setattr(cli, "global_config", config)
+    assert cli._connect_client(client, requested_model="qwen2") is True
+    assert client.set_model_calls == ["qwen2"]
 
-    cli.quick_optimize("写一个测试 prompt")
 
-    assert captured["client"].get_current_model() == "model-b"
+def test_connect_client_falls_back_to_first_ollama_model(monkeypatch):
+    monkeypatch.setattr(cli.global_config, "provider", "ollama")
+    monkeypatch.setattr(cli.global_config, "default_model", "missing-model")
+    client = DummyClient(models=["qwen2", "llama3"], connected=True)
+
+    assert cli._connect_client(client) is True
+    assert client.set_model_calls == ["qwen2"]
+
+
+def test_handle_slash_command_reports_unknown_command(monkeypatch):
+    captured = []
+    monkeypatch.setattr(cli, "print_error", captured.append)
+
+    cli.handle_slash_command("/unknown", DummyClient())
+
+    assert captured == ["Unknown command: /unknown"]
+
+
+def test_get_interactive_num_versions_clamps_to_supported_range(monkeypatch):
+    monkeypatch.setattr(cli.global_config, "num_versions", 99)
+    assert cli._get_interactive_num_versions() == 3
+
+    monkeypatch.setattr(cli.global_config, "num_versions", 0)
+    assert cli._get_interactive_num_versions() == 1
+
+
+def test_quick_optimize_writes_output_file(monkeypatch, tmp_path):
+    output_path = tmp_path / "optimized.txt"
+    dummy_client = DummyClient(models=["demo-model"], current_model="demo-model", connected=True)
+
+    monkeypatch.setattr(cli, "LLMClient", lambda config: dummy_client)
+    monkeypatch.setattr(cli, "show_optimized_versions", lambda results: None)
+    monkeypatch.setattr(
+        cli,
+        "generate_optimized_versions",
+        lambda prompt, client, num_versions, framework: [
+            {
+                "level": "light",
+                "name": "Light optimization",
+                "description": "Light pass",
+                "prompt": "optimized prompt",
+            }
+        ],
+    )
+    monkeypatch.setattr(cli.global_config, "provider", "custom")
+    monkeypatch.setattr(cli.global_config, "enable_history", False)
+    monkeypatch.setattr(cli.global_config, "custom_model", "demo-model")
+    monkeypatch.setattr(cli.global_config, "default_model", "demo-model")
+
+    cli.quick_optimize("test prompt", output=str(output_path))
+
+    content = output_path.read_text(encoding="utf-8")
+    assert "optimized prompt" in content
+    assert "Light optimization" in content

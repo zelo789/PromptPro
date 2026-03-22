@@ -1,53 +1,42 @@
-"""
-自定义异常模块
+﻿"""Project-specific exception hierarchy for PromptPro."""
 
-提供分层的异常体系，用于更精确地错误处理。
-"""
-from typing import Optional, Any
+from typing import Any, Optional
 
 
 class ErrorCode:
-    """错误码常量"""
+    """Stable error codes used across the project."""
 
-    # 配置错误 (1xx)
     CONFIG_LOAD_FAILED = 101
     CONFIG_SAVE_FAILED = 102
     CONFIG_INVALID = 103
     CONFIG_PARSE_ERROR = 104
 
-    # 连接错误 (2xx)
     CONNECTION_FAILED = 201
     CONNECTION_TIMEOUT = 202
     CONNECTION_REFUSED = 203
 
-    # 模型错误 (3xx)
     MODEL_NOT_FOUND = 301
     MODEL_LOAD_FAILED = 302
     MODEL_UNAVAILABLE = 303
 
-    # 优化错误 (4xx)
     OPTIMIZER_FAILED = 401
     OPTIMIZER_TIMEOUT = 402
     OPTIMIZER_INVALID_INPUT = 403
 
-    # 历史记录错误 (5xx)
     HISTORY_LOAD_FAILED = 501
     HISTORY_SAVE_FAILED = 502
 
-    # 剪贴板错误 (6xx)
     CLIPBOARD_COPY_FAILED = 601
 
-    # 需求文档错误 (7xx)
     REQUIREMENT_NOT_FOUND = 701
     REQUIREMENT_INVALID = 702
     REQUIREMENT_READ_FAILED = 703
 
-    # 通用错误 (9xx)
     UNKNOWN_ERROR = 999
 
 
 class PromptProError(Exception):
-    """所有 PromptPro 自定义异常的基类"""
+    """Base class for all PromptPro-specific exceptions."""
 
     def __init__(
         self,
@@ -61,13 +50,13 @@ class PromptProError(Exception):
         self.details = details
 
     def __str__(self) -> str:
-        if self.details:
-            return f"[{self.error_code}] {self.message} - 详情: {self.details}"
+        if self.details is not None:
+            return f"[{self.error_code}] {self.message} - Details: {self.details}"
         return f"[{self.error_code}] {self.message}"
 
 
 class ConfigError(PromptProError):
-    """配置相关错误"""
+    """Raised for configuration loading, parsing, or validation failures."""
 
     def __init__(
         self,
@@ -79,7 +68,7 @@ class ConfigError(PromptProError):
 
 
 class ConnectionError(PromptProError):
-    """与 LLM 服务连接相关错误"""
+    """Raised for network and provider connectivity failures."""
 
     def __init__(
         self,
@@ -91,7 +80,7 @@ class ConnectionError(PromptProError):
 
 
 class ModelError(PromptProError):
-    """模型相关错误（如模型不存在、加载失败）"""
+    """Raised for missing or unusable model selections."""
 
     def __init__(
         self,
@@ -103,7 +92,7 @@ class ModelError(PromptProError):
 
 
 class OptimizerError(PromptProError):
-    """Prompt 优化过程中的错误"""
+    """Raised when prompt analysis or optimization fails."""
 
     def __init__(
         self,
@@ -115,7 +104,7 @@ class OptimizerError(PromptProError):
 
 
 class TemplateError(PromptProError):
-    """模板相关错误"""
+    """Raised for template-related failures."""
 
     def __init__(
         self,
@@ -127,7 +116,7 @@ class TemplateError(PromptProError):
 
 
 class HistoryError(PromptProError):
-    """历史记录相关错误"""
+    """Raised for history storage and retrieval failures."""
 
     def __init__(
         self,
@@ -139,7 +128,7 @@ class HistoryError(PromptProError):
 
 
 class ClipboardError(PromptProError):
-    """剪贴板相关错误"""
+    """Raised when clipboard integration fails."""
 
     def __init__(
         self,
@@ -151,7 +140,7 @@ class ClipboardError(PromptProError):
 
 
 class RequirementError(PromptProError):
-    """需求文档相关错误"""
+    """Raised for requirement document parsing and loading failures."""
 
     def __init__(
         self,

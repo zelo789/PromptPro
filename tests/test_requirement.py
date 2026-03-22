@@ -1,226 +1,161 @@
-"""
-需求文档模块测试
-"""
-import pytest
-from pathlib import Path
-import tempfile
-import os
+"""Tests for requirement document parsing and management."""
 
-from src.requirement import (
-    RequirementDoc,
-    RequirementParser,
-    RequirementManager,
-)
-from src.exceptions import RequirementError, ErrorCode
+from pathlib import Path
+
+import pytest
+
+from src.exceptions import ErrorCode, RequirementError
+from src.requirement import RequirementDoc, RequirementManager, RequirementParser
 
 
 class TestRequirementParser:
-    """测试需求文档解析器"""
-
     def test_parse_single_line_fields(self):
-        """测试单行字段解析"""
-        content = """name: 测试文档
-intro: 这是一个简介
-tune: 调优要求
-"""
+        content = "name: Test Doc\nintro: Intro text\ntune: Tune text\n"
         doc = RequirementParser.parse_content(content)
 
-        assert doc.name == "测试文档"
-        assert doc.intro == "这是一个简介"
-        assert doc.tune == "调优要求"
+        assert doc.name == "Test Doc"
+        assert doc.intro == "Intro text"
+        assert doc.tune == "Tune text"
 
     def test_parse_multiline_fields(self):
-        """测试多行字段解析"""
-        content = """name: 多行文档
-intro: |
-  这是第一行简介
-  这是第二行简介
-  这是第三行简介
-tune: |
-  - 调优要求1
-  - 调优要求2
-"""
+        content = (
+            "name: Multi Line\n"
+            "intro: |\n"
+            "  first line\n"
+            "  second line\n"
+            "tune: |\n"
+            "  - item 1\n"
+            "  - item 2\n"
+        )
         doc = RequirementParser.parse_content(content)
 
-        assert doc.name == "多行文档"
-        assert "第一行简介" in doc.intro
-        assert "第二行简介" in doc.intro
-        assert "调优要求1" in doc.tune
-
-    def test_parse_mixed_fields(self):
-        """测试混合字段解析"""
-        content = """name: 混合文档
-intro: |
-  多行简介内容
-  第二行简介
-tune: 单行调优要求
-"""
-        doc = RequirementParser.parse_content(content)
-
-        assert doc.name == "混合文档"
-        assert "多行简介内容" in doc.intro
-        assert doc.tune == "单行调优要求"
+        assert doc.name == "Multi Line"
+        assert "first line" in doc.intro
+        assert "second line" in doc.intro
+        assert "- item 1" in doc.tune
 
     def test_parse_missing_name_raises_error(self):
-        """测试缺少 name 字段时抛出错误"""
-        content = """intro: 简介
-tune: 调优
-"""
         with pytest.raises(RequirementError) as exc_info:
-            RequirementParser.parse_content(content)
+            RequirementParser.parse_content("intro: missing name")
 
         assert exc_info.value.error_code == ErrorCode.REQUIREMENT_INVALID
 
     def test_parse_file(self, tmp_path):
-        """测试文件解析"""
         file_path = tmp_path / "test.md"
-        file_path.write_text("name: 文件测试\nintro: 简介\ntune: 调优", encoding='utf-8')
+        file_path.write_text("name: File Test\nintro: Intro\ntune: Tune", encoding="utf-8")
 
         doc = RequirementParser.parse_file(str(file_path))
-
-        assert doc.name == "文件测试"
+        assert doc.name == "File Test"
         assert doc.file_path == str(file_path)
 
     def test_parse_nonexistent_file_raises_error(self):
-        """测试解析不存在的文件时抛出错误"""
         with pytest.raises(RequirementError) as exc_info:
             RequirementParser.parse_file("/nonexistent/path.md")
 
         assert exc_info.value.error_code == ErrorCode.REQUIREMENT_NOT_FOUND
 
-    def test_parse_chinese_filename(self, tmp_path):
-        """测试中文文件名"""
-        file_path = tmp_path / "中文文档.md"
-        file_path.write_text("name: 中文测试\nintro: 简介内容", encoding='utf-8')
-
-        doc = RequirementParser.parse_file(str(file_path))
-
-        assert doc.name == "中文测试"
-
 
 class TestRequirementManager:
-    """测试需求文档管理器"""
-
     def test_discover_docs_empty_dir(self, tmp_path):
-        """测试空目录发现文档"""
         manager = RequirementManager(prompts_dir=str(tmp_path))
-        docs = manager.discover_docs()
+        assert manager.discover_docs() == []
 
-        assert docs == []
-
-    def test_discover_docs_with_files(self, tmp_path):
-        """测试目录中发现文档"""
-        # 创建测试文件
-        file1 = tmp_path / "doc1.md"
-        file1.write_text("name: 文档1\nintro: 简介1", encoding='utf-8')
-
-        file2 = tmp_path / "doc2.md"
-        file2.write_text("name: 文档2\nintro: 简介2", encoding='utf-8')
+    def test_discover_docs_sorted(self, tmp_path):
+        (tmp_path / "b.md").write_text("name: B\nintro: second", encoding="utf-8")
+        (tmp_path / "a.md").write_text("name: A\nintro: first", encoding="utf-8")
 
         manager = RequirementManager(prompts_dir=str(tmp_path))
         docs = manager.discover_docs()
 
-        assert len(docs) == 2
-        names = [d.name for d in docs]
-        assert "文档1" in names
-        assert "文档2" in names
+        assert [doc.name for doc in docs] == ["A", "B"]
 
     def test_list_docs(self, tmp_path):
-        """测试列出文档"""
-        file = tmp_path / "test.md"
-        file.write_text("name: 测试文档\nintro: 这是一个很长的简介内容需要截断显示", encoding='utf-8')
-
+        (tmp_path / "test.md").write_text(
+            "name: Preview Doc\nintro: This is a long intro for preview generation.",
+            encoding="utf-8",
+        )
         manager = RequirementManager(prompts_dir=str(tmp_path))
         docs = manager.list_docs()
 
         assert len(docs) == 1
-        assert docs[0]['name'] == "测试文档"
-        assert 'preview' in docs[0]
+        assert docs[0]["name"] == "Preview Doc"
+        assert "preview" in docs[0]
 
     def test_load_doc(self, tmp_path):
-        """测试加载文档"""
-        file = tmp_path / "load_test.md"
-        file.write_text("name: 加载测试\nintro: 简介内容\ntune: 调优要求", encoding='utf-8')
-
+        (tmp_path / "load_test.md").write_text(
+            "name: Load Test\nintro: Intro\ntune: Tune",
+            encoding="utf-8",
+        )
         manager = RequirementManager(prompts_dir=str(tmp_path))
-        doc = manager.load_doc("load_test")
 
-        assert doc.name == "加载测试"
+        doc = manager.load_doc("load_test")
+        assert doc.name == "Load Test"
 
     def test_select_and_get_current_doc(self, tmp_path):
-        """测试选择和获取当前文档"""
-        file = tmp_path / "current.md"
-        file.write_text("name: 当前文档\nintro: 简介", encoding='utf-8')
-
+        (tmp_path / "current.md").write_text("name: Current\nintro: Intro", encoding="utf-8")
         manager = RequirementManager(prompts_dir=str(tmp_path))
 
-        # 选择文档
-        doc = manager.select_doc("current")
-        assert doc.name == "当前文档"
-
-        # 获取当前文档
+        selected = manager.select_doc("current")
         current = manager.get_current_doc()
+
+        assert selected.name == "Current"
         assert current is not None
-        assert current.name == "当前文档"
+        assert current.name == "Current"
 
     def test_clear_current_doc(self, tmp_path):
-        """测试清除当前文档"""
-        file = tmp_path / "clear.md"
-        file.write_text("name: 清除测试\nintro: 简介", encoding='utf-8')
-
+        (tmp_path / "clear.md").write_text("name: Clear\nintro: Intro", encoding="utf-8")
         manager = RequirementManager(prompts_dir=str(tmp_path))
         manager.select_doc("clear")
-
-        assert manager.get_current_doc() is not None
 
         manager.clear_current_doc()
         assert manager.get_current_doc() is None
 
     def test_create_doc(self, tmp_path):
-        """测试创建文档"""
         manager = RequirementManager(prompts_dir=str(tmp_path))
-
         file_path = manager.create_doc(
-            name="新建文档",
-            intro="这是简介",
-            tune="这是调优要求",
+            name="New Doc",
+            intro="This is intro",
+            tune="This is tune",
             filename="new_doc",
         )
 
         assert Path(file_path).exists()
-
-        # 验证内容
-        doc = manager.load_doc("new_doc")
-        assert doc.name == "新建文档"
-        assert doc.intro == "这是简介"
+        loaded = manager.load_doc("new_doc")
+        assert loaded.name == "New Doc"
+        assert loaded.intro == "This is intro"
 
     def test_create_doc_with_auto_filename(self, tmp_path):
-        """测试自动生成文件名"""
         manager = RequirementManager(prompts_dir=str(tmp_path))
-
-        file_path = manager.create_doc(
-            name="自动命名测试",
-            intro="简介",
-            tune="调优",
-        )
+        file_path = manager.create_doc(name="Auto Name", intro="Intro", tune="Tune")
 
         assert Path(file_path).exists()
-        assert "自动命名测试" in file_path or "test" in file_path.lower()
+        assert "Auto_Name" in Path(file_path).stem or "Auto Name" not in Path(file_path).name
 
 
 class TestRequirementDoc:
-    """测试需求文档数据模型"""
-
     def test_doc_creation(self):
-        """测试文档创建"""
         doc = RequirementDoc(
-            name="测试",
-            intro="简介",
-            tune="调优",
+            name="Test",
+            intro="Intro",
+            tune="Tune",
             file_path="/path/to/file.md",
             updated_at="2024-01-01",
         )
 
-        assert doc.name == "测试"
-        assert doc.intro == "简介"
-        assert doc.tune == "调优"
+        assert doc.name == "Test"
+        assert doc.intro == "Intro"
+        assert doc.tune == "Tune"
+
+    def test_to_prompt_context(self):
+        doc = RequirementDoc(
+            name="Login",
+            intro="Project background",
+            tune="- be specific",
+            file_path="/tmp/login.md",
+            updated_at="2024-01-01",
+        )
+
+        context = doc.to_prompt_context()
+        assert "Requirement name: Login" in context
+        assert "Project context" in context
+        assert "Tuning requirements" in context

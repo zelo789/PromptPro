@@ -1,47 +1,32 @@
-"""
-LLM API 客户端模块
+﻿"""Provider clients used by PromptPro."""
 
-提供统一的 LLM API 接口，支持多种提供商：
-- Ollama (本地)
-- OpenAI
-- Claude (Anthropic)
-- 自定义 OpenAI 兼容 API
-"""
-import logging
-import time
-import functools
-from typing import List, Optional, Callable, Any, Dict
-import json
+from __future__ import annotations
+
 import abc
+import functools
+import json
+import time
+from typing import Any, Callable, Dict, List, Optional
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from src.config import Config
-from src.exceptions import (
-    ConnectionError as PromptProConnectionError,
-    ModelError,
-    ErrorCode,
-)
+from src.exceptions import ConnectionError as PromptProConnectionError
+from src.exceptions import ErrorCode, ModelError
 from src.logger import get_logger
 
-logger: logging.Logger
+logger = get_logger("llm_client")
 
 
 def retry_on_failure(
     max_retries: int = 3,
     delay: float = 1.0,
-    exceptions: tuple = (requests.exceptions.RequestException,),
+    exceptions: tuple[type[BaseException], ...] = (requests.exceptions.RequestException,),
 ):
-    """
-    重试装饰器
+    """Retry helper with exponential backoff for transient network failures."""
 
-    Args:
-        max_retries: 最大重试次数
-        delay: 重试延迟（秒）
-        exceptions: 触发重试的异常类型
-    """
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
@@ -49,24 +34,29 @@ def retry_on_failure(
             for attempt in range(max_retries + 1):
                 try:
                     return func(*args, **kwargs)
-                except exceptions as e:
-                    last_exception = e
+                except exceptions as exc:  # type: ignore[misc]
+                    last_exception = exc
                     if attempt < max_retries:
-                        wait_time = delay * (2 ** attempt)  # 指数退避
+                        wait_time = delay * (2 ** attempt)
                         logger.warning(
-                            f"请求失败 (尝试 {attempt + 1}/{max_retries + 1})，"
-                            f"{wait_time:.1f}秒后重试: {e}"
+                            "Request failed (%s/%s). Retrying in %.1fs: %s",
+                            attempt + 1,
+                            max_retries + 1,
+                            wait_time,
+                            exc,
                         )
                         time.sleep(wait_time)
                     else:
-                        logger.error(f"请求失败，已达最大重试次数: {e}")
+                        logger.error("Request failed after %s attempts: %s", max_retries + 1, exc)
             raise last_exception
+
         return wrapper
+
     return decorator
 
 
 class BaseLLMClient(abc.ABC):
-    """LLM 客户端基类"""
+    """Abstract base class for provider-specific clients."""
 
     def __init__(self, config: Config):
         self.config = config
@@ -78,29 +68,19 @@ class BaseLLMClient(abc.ABC):
         self._model = ""
 
     def _create_session(self) -> requests.Session:
-        """创建带重试和连接池的 Session"""
         session = requests.Session()
-
         retry_strategy = Retry(
             total=3,
             backoff_factor=0.5,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET", "OPTIONS", "POST"],
         )
-
-        adapter = HTTPAdapter(
-            max_retries=retry_strategy,
-            pool_connections=10,
-            pool_maxsize=20,
-        )
-
+        adapter = HTTPAdapter(max_retries=retry_strategy, pool_connections=10, pool_maxsize=20)
         session.mount("http://", adapter)
         session.mount("https://", adapter)
-
         return session
 
     def close(self) -> None:
-        """关闭连接"""
         self._session.close()
 
     def __enter__(self) -> "BaseLLMClient":
@@ -111,13 +91,11 @@ class BaseLLMClient(abc.ABC):
 
     @abc.abstractmethod
     def check_connection(self) -> bool:
-        """检查服务是否可用"""
-        pass
+        """Return whether the configured provider is reachable enough to use."""
 
     @abc.abstractmethod
     def list_models(self) -> List[str]:
-        """获取可用模型列表"""
-        pass
+        """Return available models for the current provider."""
 
     @abc.abstractmethod
     def chat(
@@ -127,83 +105,55 @@ class BaseLLMClient(abc.ABC):
         stream: bool = False,
         temperature: Optional[float] = None,
     ) -> str:
-        """聊天模式生成"""
-        pass
+        """Generate a response from the provider."""
 
     def set_model(self, model_name: str) -> bool:
-        """设置当前使用的模型"""
         self._model = model_name
-        logger.info(f"设置模型: {model_name}")
+        logger.info("Model set to %s", model_name)
         return True
 
     def get_current_model(self) -> str:
-        """获取当前使用的模型名称"""
         return self._model
 
     def set_temperature(self, temperature: float) -> None:
-        """设置温度参数"""
         if not 0.0 <= temperature <= 2.0:
-            raise ValueError(f"temperature 必须在 0.0 到 2.0 之间，当前值: {temperature}")
+            raise ValueError(f"temperature must be between 0.0 and 2.0, got {temperature}")
         self.temperature = temperature
-        logger.debug(f"温度参数已设置为: {temperature}")
 
     def get_available_models(self) -> List[str]:
-        """获取可用模型列表"""
         return self.list_models()
 
 
 class OllamaClient(BaseLLMClient):
-    """Ollama API 客户端"""
+    """Client for local Ollama servers."""
 
     def __init__(self, config: Config, model: Optional[str] = None):
         super().__init__(config)
-        self.base_url = config.ollama_base_url
+        self.base_url = config.ollama_base_url.rstrip("/")
         self._model = model or config.default_model
-
-        logger.debug(
-            f"初始化 OllamaClient: base_url={self.base_url}, "
-            f"model={self._model or 'auto'}"
-        )
 
     @retry_on_failure(max_retries=2, delay=1.0)
     def check_connection(self) -> bool:
-        """检查 Ollama 服务是否可用"""
         try:
-            response = self._session.get(
-                f"{self.base_url}/api/tags",
-                timeout=5,
-            )
-            if response.status_code == 200:
-                logger.debug("Ollama 服务连接成功")
-                return True
-            else:
-                logger.warning(f"Ollama 服务返回非 200 状态码：{response.status_code}")
-                return False
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Ollama 服务连接失败：{e}")
+            response = self._session.get(f"{self.base_url}/api/tags", timeout=5)
+            return response.status_code == 200
+        except requests.exceptions.RequestException as exc:
+            logger.warning("Ollama connection check failed: %s", exc)
             return False
 
     @retry_on_failure(max_retries=2, delay=1.0)
     def list_models(self) -> List[str]:
-        """获取已安装的模型列表"""
         try:
-            logger.debug("获取 Ollama 模型列表...")
-            response = self._session.get(
-                f"{self.base_url}/api/tags",
-                timeout=self.timeout,
-            )
+            response = self._session.get(f"{self.base_url}/api/tags", timeout=self.timeout)
             response.raise_for_status()
             data = response.json()
-            models = [model["name"] for model in data.get("models", [])]
-            logger.info(f"获取到 {len(models)} 个模型：{', '.join(models)}")
-            return models
-        except requests.exceptions.RequestException as e:
-            logger.error(f"无法连接 Ollama 服务获取模型列表：{e}")
+            return [model["name"] for model in data.get("models", [])]
+        except requests.exceptions.RequestException as exc:
             raise PromptProConnectionError(
-                f"无法连接 Ollama 服务：{e}",
+                f"Unable to fetch Ollama models: {exc}",
                 error_code=ErrorCode.CONNECTION_FAILED,
-                details=str(e),
-            )
+                details=str(exc),
+            ) from exc
 
     def chat(
         self,
@@ -212,36 +162,26 @@ class OllamaClient(BaseLLMClient):
         stream: bool = False,
         temperature: Optional[float] = None,
     ) -> str:
-        """聊天模式生成"""
-        model = model or self._model
-        temperature = temperature if temperature is not None else self.temperature
+        model_name = model or self._model
+        temp = self.temperature if temperature is None else temperature
 
-        if not model:
-            logger.warning("未指定模型，将使用第一个可用模型")
+        if not model_name:
             models = self.list_models()
-            if models:
-                model = models[0]
-                self._model = model
-            else:
-                raise ModelError(
-                    "没有可用的模型",
-                    error_code=ErrorCode.MODEL_UNAVAILABLE,
-                )
+            if not models:
+                raise ModelError("No Ollama models are available.", error_code=ErrorCode.MODEL_UNAVAILABLE)
+            model_name = models[0]
+            self._model = model_name
 
         payload = {
-            "model": model,
+            "model": model_name,
             "messages": messages,
             "stream": stream,
-            "options": {"temperature": temperature},
+            "options": {"temperature": temp},
         }
-
-        logger.debug(f"发送聊天请求到 Ollama 模型：{model}")
-
         return self._chat_with_retry(payload)
 
     @retry_on_failure(max_retries=3, delay=1.0)
     def _chat_with_retry(self, payload: dict) -> str:
-        """带重试的聊天请求"""
         try:
             response = self._session.post(
                 f"{self.base_url}/api/chat",
@@ -250,77 +190,53 @@ class OllamaClient(BaseLLMClient):
                 stream=True,
             )
             response.raise_for_status()
-            result = self._parse_chat_stream(response)
-            logger.debug(f"聊天请求完成，响应长度：{len(result)}")
-            return result
-        except requests.exceptions.Timeout as e:
-            logger.error(f"Ollama API 请求超时：{e}")
+            return self._parse_chat_stream(response)
+        except requests.exceptions.Timeout as exc:
             raise PromptProConnectionError(
-                f"Ollama API 请求超时 ({self.timeout}s)",
+                f"Ollama request timed out after {self.timeout}s.",
                 error_code=ErrorCode.CONNECTION_TIMEOUT,
-                details=str(e),
-            )
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Ollama API 调用失败：{e}")
+                details=str(exc),
+            ) from exc
+        except requests.exceptions.RequestException as exc:
             raise PromptProConnectionError(
-                f"Ollama API 调用失败：{e}",
+                f"Ollama request failed: {exc}",
                 error_code=ErrorCode.CONNECTION_FAILED,
-                details=str(e),
-            )
+                details=str(exc),
+            ) from exc
 
     def _parse_chat_stream(self, response: requests.Response) -> str:
-        """解析聊天流式响应"""
-        result: List[str] = []
+        chunks: List[str] = []
         for line in response.iter_lines():
-            if line:
-                try:
-                    data = json.loads(line)
-                    if "message" in data:
-                        content = data["message"].get("content", "")
-                        result.append(content)
-                except json.JSONDecodeError:
-                    logger.debug(f"解析 JSON 行失败：{line[:50]}...")
-                    continue
-        return "".join(result)
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                logger.debug("Skipping non-JSON stream fragment from Ollama.")
+                continue
+            if "message" in data:
+                chunks.append(data["message"].get("content", ""))
+        return "".join(chunks)
 
 
 class OpenAIClient(BaseLLMClient):
-    """OpenAI API 客户端"""
+    """Client for OpenAI-compatible chat completion endpoints."""
 
     def __init__(self, config: Config, model: Optional[str] = None):
         super().__init__(config)
-        self.base_url = config.openai_base_url
+        self.base_url = config.openai_base_url.rstrip("/")
         self.api_key = config.openai_api_key
         self._model = model or config.openai_model
-
-        # 设置默认请求头
         self._headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
 
-        logger.debug(
-            f"初始化 OpenAIClient: base_url={self.base_url}, "
-            f"model={self._model}"
-        )
-
     def check_connection(self) -> bool:
-        """检查 OpenAI API 是否可用"""
-        if not self.api_key:
-            logger.warning("OpenAI API Key 未配置")
-            return False
-        return True
+        return bool(self.api_key)
 
     def list_models(self) -> List[str]:
-        """获取可用模型列表"""
-        # OpenAI 不支持动态获取用户可用模型，返回常用模型
-        return [
-            "gpt-4o-mini",
-            "gpt-4o",
-            "gpt-4-turbo",
-            "gpt-4",
-            "gpt-3.5-turbo",
-        ]
+        return ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
 
     def chat(
         self,
@@ -329,24 +245,16 @@ class OpenAIClient(BaseLLMClient):
         stream: bool = False,
         temperature: Optional[float] = None,
     ) -> str:
-        """聊天模式生成"""
-        model = model or self._model or "gpt-4o-mini"
-        temperature = temperature if temperature is not None else self.temperature
-
         payload = {
-            "model": model,
+            "model": model or self._model or "gpt-4o-mini",
             "messages": messages,
-            "temperature": temperature,
+            "temperature": self.temperature if temperature is None else temperature,
             "stream": False,
         }
-
-        logger.debug(f"发送聊天请求到 OpenAI 模型：{model}")
-
         return self._chat_with_retry(payload)
 
     @retry_on_failure(max_retries=3, delay=1.0)
     def _chat_with_retry(self, payload: dict) -> str:
-        """带重试的聊天请求"""
         try:
             response = self._session.post(
                 f"{self.base_url}/chat/completions",
@@ -356,59 +264,42 @@ class OpenAIClient(BaseLLMClient):
             )
             response.raise_for_status()
             data = response.json()
-
-            content = data["choices"][0]["message"]["content"]
-            logger.debug(f"聊天请求完成，响应长度：{len(content)}")
-            return content
-        except requests.exceptions.Timeout as e:
-            logger.error(f"OpenAI API 请求超时：{e}")
+            return data["choices"][0]["message"]["content"]
+        except requests.exceptions.Timeout as exc:
             raise PromptProConnectionError(
-                f"OpenAI API 请求超时 ({self.timeout}s)",
+                f"OpenAI request timed out after {self.timeout}s.",
                 error_code=ErrorCode.CONNECTION_TIMEOUT,
-                details=str(e),
-            )
-        except requests.exceptions.RequestException as e:
-            logger.error(f"OpenAI API 调用失败：{e}")
+                details=str(exc),
+            ) from exc
+        except requests.exceptions.RequestException as exc:
             raise PromptProConnectionError(
-                f"OpenAI API 调用失败：{e}",
+                f"OpenAI request failed: {exc}",
                 error_code=ErrorCode.CONNECTION_FAILED,
-                details=str(e),
-            )
+                details=str(exc),
+            ) from exc
 
 
 class ClaudeClient(BaseLLMClient):
-    """Claude API 客户端"""
+    """Client for Anthropic's Messages API."""
 
     def __init__(self, config: Config, model: Optional[str] = None):
         super().__init__(config)
-        self.base_url = config.claude_base_url
+        self.base_url = config.claude_base_url.rstrip("/")
         self.api_key = config.claude_api_key
         self._model = model or config.claude_model
-
-        # 设置默认请求头
         self._headers = {
             "x-api-key": self.api_key,
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         }
 
-        logger.debug(
-            f"初始化 ClaudeClient: base_url={self.base_url}, "
-            f"model={self._model}"
-        )
-
     def check_connection(self) -> bool:
-        """检查 Claude API 是否可用"""
-        if not self.api_key:
-            logger.warning("Claude API Key 未配置")
-            return False
-        return True
+        return bool(self.api_key)
 
     def list_models(self) -> List[str]:
-        """获取可用模型列表"""
         return [
-            "claude-opus-4-6",
-            "claude-sonnet-4-6",
+            "claude-opus-4-1",
+            "claude-sonnet-4-0",
             "claude-3-5-sonnet-20241022",
             "claude-3-5-haiku-20241022",
             "claude-3-opus-20240229",
@@ -423,37 +314,26 @@ class ClaudeClient(BaseLLMClient):
         stream: bool = False,
         temperature: Optional[float] = None,
     ) -> str:
-        """聊天模式生成"""
-        model = model or self._model or "claude-3-5-sonnet-20241022"
-        temperature = temperature if temperature is not None else self.temperature
-
-        # Claude API 需要分离 system 消息
         system_prompt = ""
         chat_messages = []
-
-        for msg in messages:
-            if msg["role"] == "system":
-                system_prompt = msg["content"]
+        for message in messages:
+            if message["role"] == "system":
+                system_prompt = message["content"]
             else:
-                chat_messages.append(msg)
+                chat_messages.append(message)
 
-        payload = {
-            "model": model,
+        payload: Dict[str, Any] = {
+            "model": model or self._model or "claude-3-5-sonnet-20241022",
             "max_tokens": 4096,
             "system": system_prompt,
             "messages": chat_messages,
         }
-
         if temperature is not None:
             payload["temperature"] = temperature
-
-        logger.debug(f"发送聊天请求到 Claude 模型：{model}")
-
         return self._chat_with_retry(payload)
 
     @retry_on_failure(max_retries=3, delay=1.0)
     def _chat_with_retry(self, payload: dict) -> str:
-        """带重试的聊天请求"""
         try:
             response = self._session.post(
                 f"{self.base_url}/v1/messages",
@@ -463,69 +343,45 @@ class ClaudeClient(BaseLLMClient):
             )
             response.raise_for_status()
             data = response.json()
-
-            content = data["content"][0]["text"]
-            logger.debug(f"聊天请求完成，响应长度：{len(content)}")
-            return content
-        except requests.exceptions.Timeout as e:
-            logger.error(f"Claude API 请求超时：{e}")
+            return data["content"][0]["text"]
+        except requests.exceptions.Timeout as exc:
             raise PromptProConnectionError(
-                f"Claude API 请求超时 ({self.timeout}s)",
+                f"Claude request timed out after {self.timeout}s.",
                 error_code=ErrorCode.CONNECTION_TIMEOUT,
-                details=str(e),
-            )
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Claude API 调用失败：{e}")
+                details=str(exc),
+            ) from exc
+        except requests.exceptions.RequestException as exc:
             raise PromptProConnectionError(
-                f"Claude API 调用失败：{e}",
+                f"Claude request failed: {exc}",
                 error_code=ErrorCode.CONNECTION_FAILED,
-                details=str(e),
-            )
+                details=str(exc),
+            ) from exc
 
 
 class CustomClient(BaseLLMClient):
-    """自定义 OpenAI 兼容 API 客户端"""
+    """Client for arbitrary OpenAI-compatible endpoints."""
 
     def __init__(self, config: Config, model: Optional[str] = None):
         super().__init__(config)
-        self.base_url = config.custom_base_url
+        self.base_url = config.custom_base_url.rstrip("/")
         self.api_key = config.custom_api_key
         self._model = model or config.custom_model
-
-        # 设置默认请求头
         self._headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
 
-        logger.debug(
-            f"初始化 CustomClient: base_url={self.base_url}, "
-            f"model={self._model}"
-        )
-
     def check_connection(self) -> bool:
-        """检查自定义 API 是否可用"""
-        if not self.base_url:
-            logger.warning("自定义 API Base URL 未配置")
-            return False
-        return True
+        return bool(self.base_url)
 
     def list_models(self) -> List[str]:
-        """获取可用模型列表"""
-        # 尝试获取模型列表，如果失败返回默认
         try:
-            response = self._session.get(
-                f"{self.base_url}/models",
-                headers=self._headers,
-                timeout=10,
-            )
+            response = self._session.get(f"{self.base_url}/models", headers=self._headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
-                models = [m["id"] for m in data.get("data", [])]
-                return models[:20]  # 限制返回数量
-        except Exception as e:
-            logger.debug(f"获取模型列表失败: {e}")
-
+                return [model["id"] for model in data.get("data", [])][:20]
+        except Exception as exc:
+            logger.debug("Custom provider model discovery failed: %s", exc)
         return [self._model] if self._model else ["custom-model"]
 
     def chat(
@@ -535,24 +391,16 @@ class CustomClient(BaseLLMClient):
         stream: bool = False,
         temperature: Optional[float] = None,
     ) -> str:
-        """聊天模式生成"""
-        model = model or self._model or "default"
-        temperature = temperature if temperature is not None else self.temperature
-
         payload = {
-            "model": model,
+            "model": model or self._model or "default",
             "messages": messages,
-            "temperature": temperature,
+            "temperature": self.temperature if temperature is None else temperature,
             "stream": False,
         }
-
-        logger.debug(f"发送聊天请求到自定义 API 模型：{model}")
-
         return self._chat_with_retry(payload)
 
     @retry_on_failure(max_retries=3, delay=1.0)
     def _chat_with_retry(self, payload: dict) -> str:
-        """带重试的聊天请求"""
         try:
             response = self._session.post(
                 f"{self.base_url}/chat/completions",
@@ -562,73 +410,47 @@ class CustomClient(BaseLLMClient):
             )
             response.raise_for_status()
             data = response.json()
-
-            content = data["choices"][0]["message"]["content"]
-            logger.debug(f"聊天请求完成，响应长度：{len(content)}")
-            return content
-        except requests.exceptions.Timeout as e:
-            logger.error(f"自定义 API 请求超时：{e}")
+            return data["choices"][0]["message"]["content"]
+        except requests.exceptions.Timeout as exc:
             raise PromptProConnectionError(
-                f"自定义 API 请求超时 ({self.timeout}s)",
+                f"Custom provider request timed out after {self.timeout}s.",
                 error_code=ErrorCode.CONNECTION_TIMEOUT,
-                details=str(e),
-            )
-        except requests.exceptions.RequestException as e:
-            logger.error(f"自定义 API 调用失败：{e}")
+                details=str(exc),
+            ) from exc
+        except requests.exceptions.RequestException as exc:
             raise PromptProConnectionError(
-                f"自定义 API 调用失败：{e}",
+                f"Custom provider request failed: {exc}",
                 error_code=ErrorCode.CONNECTION_FAILED,
-                details=str(e),
-            )
+                details=str(exc),
+            ) from exc
 
 
 class LLMClient:
-    """
-    统一的 LLM 客户端
-
-    根据配置自动选择对应的 API 提供商
-    """
+    """Thin wrapper that picks a provider client from configuration."""
 
     def __init__(self, config: Optional[Config] = None, model: Optional[str] = None):
-        """
-        初始化 LLM 客户端
-
-        Args:
-            config: 配置对象，可选
-            model: 初始模型名称，可选
-        """
-        global logger
-        logger = get_logger("llm_client")
-
         self.config = config or Config.load()
         self._model = model
         self._client = self._create_client()
         self.temperature = self.config.temperature
 
-        logger.debug(f"初始化 LLMClient: provider={self.config.provider}")
-
     def _create_client(self) -> BaseLLMClient:
-        """根据配置创建对应的客户端"""
         provider = self.config.provider
-
         if provider == "ollama":
             return OllamaClient(self.config, self._model)
-        elif provider == "openai":
+        if provider == "openai":
             return OpenAIClient(self.config, self._model)
-        elif provider == "claude":
+        if provider == "claude":
             return ClaudeClient(self.config, self._model)
-        elif provider == "custom":
+        if provider == "custom":
             return CustomClient(self.config, self._model)
-        else:
-            logger.warning(f"未知的 provider: {provider}，使用 Ollama")
-            return OllamaClient(self.config, self._model)
+        logger.warning("Unknown provider '%s'; falling back to Ollama.", provider)
+        return OllamaClient(self.config, self._model)
 
     def check_connection(self) -> bool:
-        """检查服务是否可用"""
         return self._client.check_connection()
 
     def list_models(self) -> List[str]:
-        """获取可用模型列表"""
         return self._client.list_models()
 
     def chat(
@@ -638,32 +460,25 @@ class LLMClient:
         stream: bool = False,
         temperature: Optional[float] = None,
     ) -> str:
-        """聊天模式生成"""
-        temp = temperature if temperature is not None else self.temperature
+        temp = self.temperature if temperature is None else temperature
         return self._client.chat(messages, model, stream, temp)
 
     def set_model(self, model_name: str) -> bool:
-        """设置当前使用的模型"""
         return self._client.set_model(model_name)
 
     def get_current_model(self) -> str:
-        """获取当前使用的模型名称"""
         return self._client.get_current_model()
 
     def get_available_models(self) -> List[str]:
-        """获取可用模型列表"""
         return self._client.get_available_models()
 
     def set_temperature(self, temperature: float) -> None:
-        """设置温度参数"""
         if not 0.0 <= temperature <= 2.0:
-            raise ValueError(f"temperature 必须在 0.0 到 2.0 之间，当前值: {temperature}")
+            raise ValueError(f"temperature must be between 0.0 and 2.0, got {temperature}")
         self.temperature = temperature
         self._client.temperature = temperature
-        logger.debug(f"温度参数已设置为: {temperature}")
 
     def close(self) -> None:
-        """关闭连接"""
         self._client.close()
 
     def __enter__(self) -> "LLMClient":

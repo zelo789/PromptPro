@@ -1,106 +1,99 @@
-"""
-配置管理模块
+"""Configuration management for PromptPro."""
 
-提供全局配置管理功能，支持多种 LLM API 提供商。
-默认配置文件位置：~/.prompt-optimizer/config.json
-可通过 PROMPTPRO_HOME 覆盖配置目录。
-"""
-from dataclasses import MISSING, dataclass, field, asdict
-from typing import List, Dict, Any, Optional, ClassVar
+from dataclasses import MISSING, asdict, dataclass, field
+from pathlib import Path
+from typing import Any, ClassVar, Dict, List
 import json
 import os
-from pathlib import Path
 import shutil
 
-from src.logger import get_logger
 from src.exceptions import ConfigError
+from src.logger import get_logger
 
 logger = get_logger("config")
 
-# 配置版本号，用于迁移
 CONFIG_VERSION = 3
-DEFAULT_APP_DIRNAME = ".prompt-optimizer"
-PROMPTPRO_HOME_ENV = "PROMPTPRO_HOME"
+DEFAULT_CONFIG_DIRNAME = ".prompt-optimizer"
+CONFIG_FILENAME = "config.json"
+HISTORY_FILENAME = "history.json"
+CONFIG_DIR_ENV_VAR = "PROMPTPRO_CONFIG_DIR"
+
+ENV_TO_CONFIG_MAP: Dict[str, str] = {
+    "OLLAMA_BASE_URL": "ollama_base_url",
+    "OPENAI_API_KEY": "openai_api_key",
+    "OPENAI_BASE_URL": "openai_base_url",
+    "CLAUDE_API_KEY": "claude_api_key",
+    "CLAUDE_BASE_URL": "claude_base_url",
+    "CUSTOM_API_KEY": "custom_api_key",
+    "CUSTOM_BASE_URL": "custom_base_url",
+    "PROMPTPRO_PROVIDER": "provider",
+}
+
+SECRET_FIELDS = {"openai_api_key", "claude_api_key", "custom_api_key"}
 
 
-def resolve_config_dir() -> Path:
-    """解析配置目录，优先使用环境变量。"""
-    custom_home = os.environ.get(PROMPTPRO_HOME_ENV)
-    if custom_home:
-        return Path(custom_home).expanduser()
-    return Path.home() / DEFAULT_APP_DIRNAME
+def _get_env_key(var_name: str, default: str = "") -> str:
+    return os.getenv(var_name, default)
 
 
-def get_display_config_file(config: Optional["Config"] = None) -> str:
-    """返回当前生效的配置文件路径。"""
-    current = config or get_config()
-    return current.config_file
+def _get_env_bool(var_name: str) -> bool | None:
+    value = os.getenv(var_name)
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _get_default_config_home() -> Path:
+    configured_dir = _get_env_key(CONFIG_DIR_ENV_VAR)
+    if configured_dir:
+        return Path(configured_dir).expanduser()
+    return Path.home() / DEFAULT_CONFIG_DIRNAME
 
 
 @dataclass
 class Config:
-    """
-    PromptPro 配置类
-
-    支持多种 LLM API 提供商：Ollama、OpenAI、Claude、自定义 OpenAI 兼容 API
-    """
-
-    # 版本号
     version: int = CONFIG_VERSION
-
-    # 当前使用的提供商: ollama, openai, claude, custom
     provider: str = "ollama"
 
-    # Ollama 配置
     ollama_base_url: str = "http://localhost:11434"
 
-    # OpenAI 配置
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-4o-mini"
 
-    # Claude 配置
     claude_api_key: str = ""
     claude_base_url: str = "https://api.anthropic.com"
     claude_model: str = "claude-3-5-sonnet-20241022"
 
-    # 自定义 API 配置 (OpenAI 兼容格式)
     custom_api_key: str = ""
     custom_base_url: str = ""
     custom_model: str = ""
 
-    # 默认模型 (向后兼容)
     default_model: str = ""
 
-    # 模型参数
     temperature: float = 0.7
     request_timeout: int = 300
     max_retries: int = 3
     retry_delay: float = 1.0
 
-    # 优化配置
-    optimization_dimensions: List[str] = field(default_factory=lambda: [
-        "structure", "clarity", "context", "constraints", "examples",
-    ])
+    optimization_dimensions: List[str] = field(
+        default_factory=lambda: ["structure", "clarity", "context", "constraints", "examples"]
+    )
     num_versions: int = 3
 
-    # 历史记录配置
     enable_history: bool = True
     max_history_items: int = 100
-
-    # 剪贴板配置
     auto_clipboard: bool = True
-
-    # 问答式需求确认
     enable_clarifying_questions: bool = True
-
-    # 日志配置
     log_level: str = "INFO"
 
-    # 路径配置
-    config_dir: str = field(default_factory=lambda: str(resolve_config_dir()))
+    config_dir: str = field(default_factory=lambda: str(_get_default_config_home()))
 
-    # 验证规则
     _validators: ClassVar[Dict[str, Any]] = {
         "temperature": {"min": 0.0, "max": 2.0},
         "max_retries": {"min": 0, "max": 10},
@@ -112,104 +105,151 @@ class Config:
         "provider": {"choices": ["ollama", "openai", "claude", "custom"]},
     }
 
+    def __post_init__(self) -> None:
+        Path(self.config_dir).mkdir(parents=True, exist_ok=True)
+
     @property
     def config_file(self) -> str:
-        return os.path.join(self.config_dir, "config.json")
+        return str(Path(self.config_dir) / CONFIG_FILENAME)
 
     @property
     def history_file(self) -> str:
-        return os.path.join(self.config_dir, "history.json")
+        return str(Path(self.config_dir) / HISTORY_FILENAME)
 
     def validate(self) -> List[str]:
-        errors = []
-
+        errors: List[str] = []
         for field_name, rules in self._validators.items():
             value = getattr(self, field_name, None)
             if value is None:
                 continue
-
-            if "min" in rules and "max" in rules:
-                if not (rules["min"] <= value <= rules["max"]):
-                    errors.append(f"{field_name} 必须在 {rules['min']} 到 {rules['max']} 之间")
-            elif "choices" in rules:
-                if value not in rules["choices"]:
-                    errors.append(f"{field_name} 必须是 {rules['choices']} 之一")
-
+            if "min" in rules and "max" in rules and not (rules["min"] <= value <= rules["max"]):
+                errors.append(f"{field_name} must be between {rules['min']} and {rules['max']}")
+            if "choices" in rules and value not in rules["choices"]:
+                errors.append(f"{field_name} must be one of {rules['choices']}")
         return errors
 
     def is_valid(self) -> bool:
-        return len(self.validate()) == 0
+        return not self.validate()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    def to_safe_dict(self) -> Dict[str, Any]:
+        data = self.to_dict()
+        for key in SECRET_FIELDS:
+            if data.get(key):
+                data[key] = "***"
+        return data
 
     def save(self) -> None:
-        os.makedirs(self.config_dir, exist_ok=True)
-
-        if os.path.exists(self.config_file):
-            backup_file = self.config_file + ".bak"
+        config_path = Path(self.config_file)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        if config_path.exists():
+            backup_path = config_path.with_suffix(config_path.suffix + ".bak")
             try:
-                shutil.copy2(self.config_file, backup_file)
-            except OSError as e:
-                logger.warning(f"备份配置文件失败：{e}")
-
-        config_data = asdict(self)
-        # 敏感信息脱敏（日志中不显示）
-        safe_data = {**config_data}
-        for key in ['openai_api_key', 'claude_api_key', 'custom_api_key']:
-            if safe_data.get(key):
-                safe_data[key] = '***'
+                shutil.copy2(config_path, backup_path)
+            except OSError as exc:
+                logger.warning("Failed to back up config file: %s", exc)
 
         try:
-            with open(self.config_file, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, ensure_ascii=False, indent=2)
-            logger.info(f"配置已保存到：{self.config_file}")
-        except OSError as e:
-            logger.error(f"保存配置文件失败：{e}")
-            raise ConfigError(f"保存配置文件失败：{e}")
+            config_path.write_text(
+                json.dumps(self.to_dict(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            raise ConfigError(f"Failed to save config: {exc}", details=str(exc)) from exc
 
     @classmethod
-    def load(cls, config_dir: Optional[str] = None) -> "Config":
-        resolved_dir = Path(config_dir).expanduser() if config_dir else resolve_config_dir()
-        config_file = str(resolved_dir / "config.json")
+    def load(cls, config_dir: str = "") -> "Config":
+        config_home = Path(config_dir).expanduser() if config_dir else _get_default_config_home()
+        config_path = config_home / CONFIG_FILENAME
+        if not config_path.exists():
+            config_data = cls._apply_env_overrides({})
+            config_data["config_dir"] = str(config_home)
+            return cls(**config_data)
 
-        if os.path.exists(config_file):
-            try:
-                with open(config_file, "r", encoding="utf-8") as f:
-                    config_data = json.load(f)
+        try:
+            config_data = json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ConfigError(f"Failed to parse config file: {exc}", details=str(exc)) from exc
 
-                config_data = cls._migrate_config(config_data)
-                config_data["config_dir"] = str(resolved_dir)
-                logger.info(f"配置已加载：{config_file}")
-                return cls(**config_data)
+        config_data = {
+            key: value for key, value in config_data.items()
+            if not str(key).startswith("_")
+        }
+        config_data = cls._migrate_config(config_data)
+        config_data = cls._apply_env_overrides(config_data)
+        config_data["config_dir"] = str(config_home)
 
-            except json.JSONDecodeError as e:
-                logger.error(f"配置文件解析失败：{e}")
-                raise ConfigError(f"配置文件解析失败：{e}")
-            except TypeError as e:
-                logger.error(f"配置文件内容无效：{e}")
-                raise ConfigError(f"配置文件内容无效：{e}")
+        try:
+            return cls(**config_data)
+        except TypeError as exc:
+            raise ConfigError(f"Invalid config data: {exc}", details=str(exc)) from exc
 
-        logger.debug("配置文件不存在，使用默认配置")
-        return cls(config_dir=str(resolved_dir))
+    @classmethod
+    def _apply_env_overrides(cls, config_data: Dict[str, Any]) -> Dict[str, Any]:
+        merged = dict(config_data)
+        for env_var, config_key in ENV_TO_CONFIG_MAP.items():
+            value = os.getenv(env_var)
+            if value:
+                merged[config_key] = value
+
+        model_override = os.getenv("PROMPTPRO_MODEL")
+        if model_override:
+            provider = merged.get("provider", "ollama")
+            merged["default_model"] = model_override
+            provider_model_keys = {
+                "ollama": "default_model",
+                "openai": "openai_model",
+                "claude": "claude_model",
+                "custom": "custom_model",
+            }
+            merged[provider_model_keys.get(provider, "default_model")] = model_override
+
+        float_overrides = {
+            "PROMPTPRO_TEMPERATURE": "temperature",
+            "PROMPTPRO_RETRY_DELAY": "retry_delay",
+        }
+        for env_var, config_key in float_overrides.items():
+            value = os.getenv(env_var)
+            if value:
+                try:
+                    merged[config_key] = float(value)
+                except ValueError:
+                    logger.warning("Ignoring invalid %s value: %s", env_var, value)
+
+        int_overrides = {
+            "PROMPTPRO_TIMEOUT": "request_timeout",
+            "PROMPTPRO_MAX_RETRIES": "max_retries",
+            "PROMPTPRO_NUM_VERSIONS": "num_versions",
+            "PROMPTPRO_MAX_HISTORY_ITEMS": "max_history_items",
+        }
+        for env_var, config_key in int_overrides.items():
+            value = os.getenv(env_var)
+            if value:
+                try:
+                    merged[config_key] = int(value)
+                except ValueError:
+                    logger.warning("Ignoring invalid %s value: %s", env_var, value)
+
+        bool_overrides = {
+            "PROMPTPRO_ENABLE_HISTORY": "enable_history",
+            "PROMPTPRO_AUTO_CLIPBOARD": "auto_clipboard",
+            "PROMPTPRO_ENABLE_CLARIFY": "enable_clarifying_questions",
+        }
+        for env_var, config_key in bool_overrides.items():
+            value = _get_env_bool(env_var)
+            if value is not None:
+                merged[config_key] = value
+        return merged
 
     @classmethod
     def _migrate_config(cls, config_data: Dict[str, Any]) -> Dict[str, Any]:
         version = config_data.get("version", 1)
         migrated = dict(config_data)
-        valid_fields = cls.__dataclass_fields__
-
-        if version < 2:
-            logger.info("正在迁移配置从 v1 到 v2...")
-            for field_name, field_info in valid_fields.items():
-                if field_name in migrated:
-                    continue
-                if field_info.default is not MISSING:
-                    migrated[field_name] = field_info.default
-                elif field_info.default_factory is not MISSING:
-                    migrated[field_name] = field_info.default_factory()
-            migrated["version"] = 2
-            version = 2
+        valid_fields = {name for name, info in cls.__dataclass_fields__.items() if info.init}
 
         if version < 3:
-            logger.info("正在迁移配置从 v2 到 v3...")
             migrated.setdefault("provider", "ollama")
             migrated.setdefault("openai_api_key", "")
             migrated.setdefault("openai_base_url", "https://api.openai.com/v1")
@@ -220,90 +260,73 @@ class Config:
             migrated.setdefault("custom_api_key", "")
             migrated.setdefault("custom_base_url", "")
             migrated.setdefault("custom_model", "")
-            migrated["version"] = CONFIG_VERSION
 
-        return {k: v for k, v in migrated.items() if k in valid_fields}
+        for field_name, field_info in cls.__dataclass_fields__.items():
+            if not field_info.init:
+                continue
+            if field_name in migrated:
+                continue
+            if field_info.default_factory is not MISSING:  # type: ignore[attr-defined]
+                migrated[field_name] = field_info.default_factory()
+            elif field_info.default is not MISSING:
+                migrated[field_name] = field_info.default
 
-    def update(self, save: bool = True, **kwargs: Any) -> List[str]:
-        unknown_keys = []
+        migrated["version"] = CONFIG_VERSION
+        return {
+            key: value for key, value in migrated.items()
+            if key in valid_fields and not str(key).startswith("_")
+        }
+
+    def update(self, **kwargs: Any) -> List[str]:
+        unknown_keys: List[str] = []
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
-                logger.debug(f"配置项已更新：{key}")
             else:
                 unknown_keys.append(key)
-
-        if save:
-            self.save()
+        self.save()
         return unknown_keys
 
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
     def reset(self) -> None:
-        default_config = Config(config_dir=self.config_dir)
-        for field_name in self.__dataclass_fields__:
-            if field_name != "config_dir":
-                setattr(self, field_name, getattr(default_config, field_name))
+        defaults = Config(config_dir=self.config_dir)
+        for field_name, field_info in self.__dataclass_fields__.items():
+            if not field_info.init:
+                continue
+            if field_name == "config_dir":
+                continue
+            setattr(self, field_name, getattr(defaults, field_name))
         self.save()
-        logger.info("配置已重置为默认值")
 
     def get_current_model(self) -> str:
-        """获取当前提供商的默认模型"""
         if self.provider == "ollama":
             return self.default_model
-        elif self.provider == "openai":
+        if self.provider == "openai":
             return self.openai_model
-        elif self.provider == "claude":
+        if self.provider == "claude":
             return self.claude_model
-        elif self.provider == "custom":
+        if self.provider == "custom":
             return self.custom_model
         return ""
 
     def get_api_key(self) -> str:
-        """获取当前提供商的 API Key"""
         if self.provider == "openai":
             return self.openai_api_key
-        elif self.provider == "claude":
+        if self.provider == "claude":
             return self.claude_api_key
-        elif self.provider == "custom":
+        if self.provider == "custom":
             return self.custom_api_key
         return ""
 
     def get_base_url(self) -> str:
-        """获取当前提供商的 Base URL"""
         if self.provider == "ollama":
             return self.ollama_base_url
-        elif self.provider == "openai":
+        if self.provider == "openai":
             return self.openai_base_url
-        elif self.provider == "claude":
+        if self.provider == "claude":
             return self.claude_base_url
-        elif self.provider == "custom":
+        if self.provider == "custom":
             return self.custom_base_url
         return ""
 
-_global_config: Optional[Config] = None
 
-
-def get_config(force_reload: bool = False) -> Config:
-    """懒加载全局配置实例。"""
-    global _global_config
-    if force_reload or _global_config is None:
-        _global_config = Config.load()
-    return _global_config
-
-
-class LazyConfigProxy:
-    """向后兼容的懒加载配置代理。"""
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(get_config(), name)
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        setattr(get_config(), name, value)
-
-    def __repr__(self) -> str:
-        return repr(get_config())
-
-
-global_config = LazyConfigProxy()
+global_config = Config.load()
