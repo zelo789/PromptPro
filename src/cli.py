@@ -35,18 +35,38 @@ from src.ui.tables import show_docs_list, show_doc_detail, show_optimized_versio
 
 logger = get_logger("cli")
 
-CLARIFYING_QUESTIONS_PROMPT = """You are a professional requirements analyst.
-Analyze the user's original prompt and generate 3-5 short clarifying questions.
+CLARIFYING_QUESTIONS_PROMPT = """You are an expert requirements analyst specializing in prompt engineering.
+Your task is to ask targeted clarifying questions to deeply understand the user's prompt.
+
+Analyze the original prompt and generate 6-10 specific questions that cover:
+
+1. **Context & Background**: Why is this needed? What's the bigger picture?
+2. **Target Audience**: Who will use the output? What expertise level?
+3. **Output Format**: What format should the result be in? Length? Structure?
+4. **Constraints**: Any limitations, rules, or requirements to follow?
+5. **Examples**: Any reference materials or style guides?
+6. **Edge Cases**: What should happen in special situations?
 
 Requirements:
-1. Questions must be specific and actionable.
-2. Focus on goal, audience, constraints, and expected output.
-3. Return one question per line.
-4. Return questions only.
+- Questions must be specific and actionable for the given prompt
+- Ask follow-up questions based on what you don't know about the prompt
+- Each question should help significantly improve the optimization
+- Return one question per line, no numbering
+- Return ONLY questions, no explanations
 
 Original prompt:
-{prompt}
-"""
+{prompt}"""
+
+REFINE_PROMPT = """You are a prompt refinement expert. Based on the user's feedback, refine the optimized prompt to better meet user needs.
+
+Original prompt: {original}
+
+Current optimized version:
+{current_version}
+
+User feedback: {feedback}
+
+Please provide a refined version of the prompt that addresses the user's feedback."""
 
 _encoding_fixed = False
 
@@ -84,26 +104,41 @@ def generate_clarifying_questions(prompt: str, client: LLMClient) -> List[str]:
 
     questions: List[str] = []
     for line in response.strip().splitlines():
-        cleaned = re.sub(r"^\d+[.)、]\s*", "", line.strip())
-        if cleaned and not cleaned.startswith("#"):
+        cleaned = line.strip()
+        # Remove numbering like "1.", "1)", "①", etc.
+        cleaned = re.sub(r"^[\d\u2460-\u249b]+[.)]\s*", "", cleaned)
+        cleaned = re.sub(r"^[①-⑨]\s*", "", cleaned)
+        if cleaned and not cleaned.startswith("#") and len(cleaned) > 5:
             questions.append(cleaned)
-    return questions[:5]
+    return questions[:8]  # Increased from 5 to 8
 
 
 def ask_clarifying_questions(prompt: str, client: LLMClient) -> str:
-    if len(prompt.strip()) < 5:
-        return prompt
-
-    rprint("[dim]Analyzing prompt details...[/dim]")
+    # Always ask clarifying questions to get better results
+    rprint("[dim]深入分析需求中...[/dim]")
     questions = generate_clarifying_questions(prompt, client)
+
+    # If no questions generated, try again with simpler prompt
     if not questions:
+        simpler_prompt = prompt + "\n\n请生成3-5个关于这个需求的澄清问题。"
+        messages = [{"role": "user", "content": simpler_prompt}]
+        try:
+            response = client.chat(messages)
+            for line in response.strip().splitlines():
+                cleaned = line.strip()
+                if cleaned and len(cleaned) > 5 and not cleaned.startswith("#"):
+                    questions.append(cleaned)
+        except Exception:
+            pass
+
+    if not questions:
+        rprint("[yellow]无法生成澄清问题，继续优化...[/yellow]\n")
         return prompt
 
     console.print()
     console.print(
         Panel(
-            "[bold]Answer any useful questions below.[/bold]\n"
-            "[dim]Press Enter to skip one question, or type 'skip' to stop.[/dim]",
+            "[bold]请回答以下问题以获得更好的优化结果:[/bold]",
             title="Clarify",
             border_style="cyan",
             box=box.ROUNDED,
@@ -114,17 +149,18 @@ def ask_clarifying_questions(prompt: str, client: LLMClient) -> str:
     answers: List[str] = []
     for index, question in enumerate(questions, 1):
         console.print(f"  [cyan][bold]{index}[/bold][/cyan] {question}")
-        answer = Prompt.ask("  [dim]Answer[/dim]", default="")
+        answer = Prompt.ask("  [dim]请输入你的回答 (直接回车跳过问题)[/dim]", default="")
         if answer.lower() == "skip":
             break
         if answer.strip():
-            answers.append(f"Q: {question}\nA: {answer.strip()}")
+            answers.append(f"问: {question}\n答: {answer.strip()}")
         console.print()
 
     if not answers:
+        rprint("[yellow]未回答任何问题，将直接进行优化...[/yellow]\n")
         return prompt
 
-    return f"Original request:\n{prompt}\n\nAdditional context:\n" + "\n".join(answers)
+    return f"原始需求:\n{prompt}\n\n补充信息:\n" + "\n".join(answers)
 
 
 def show_help() -> None:
@@ -466,6 +502,130 @@ def _offer_copy_to_clipboard(results: List[dict]) -> None:
             print_warning("Clipboard is not available")
 
 
+def refine_prompt(
+    original_prompt: str,
+    results: List[dict],
+    client: LLMClient,
+    selected_version_idx: int,
+) -> None:
+    """Allow user to provide feedback and refine a specific version."""
+    selected = results[selected_version_idx]
+    current_version = selected["prompt"]
+
+    console.print()
+    console.print(
+        Panel(
+            f"[bold]Refine Version {selected_version_idx + 1}: {selected['name']}[/bold]\n"
+            "[dim]Enter your feedback to improve the prompt, or press Enter to go back.[/dim]",
+            border_style="yellow",
+            box=box.ROUNDED,
+        )
+    )
+    console.print()
+
+    # Show current version for reference
+    console.print(Panel(
+        f"[dim]Current version:[/dim]\n{current_version[:500]}{'...' if len(current_version) > 500 else ''}",
+        border_style="dim",
+        box=box.ROUNDED,
+    ))
+    console.print()
+
+    feedback = Prompt.ask("[yellow]Your feedback[/yellow] [dim](e.g., 'make it more concise', 'add more examples')[/dim]")
+
+    if not feedback.strip():
+        return
+
+    # Generate refined version
+    messages = [
+        {"role": "user", "content": REFINE_PROMPT.format(
+            original=original_prompt,
+            current_version=current_version,
+            feedback=feedback,
+        )}
+    ]
+
+    with Progress(
+        SpinnerColumn(spinner_name="dots"),
+        TextColumn("[progress.description]{task.description}", style="cyan"),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("[cyan]Refining prompt...[/cyan]", total=1)
+        try:
+            refined = client.chat(messages)
+            progress.advance(task)
+        except Exception as exc:
+            logger.error("Failed to refine prompt: %s", exc)
+            print_error(f"Refinement failed: {exc}")
+            return
+
+    # Update the selected version with refined result
+    results[selected_version_idx] = {
+        **selected,
+        "prompt": refined,
+        "name": f"{selected['name']} (refined)",
+    }
+
+    console.print()
+    console.print(
+        Panel(
+            f"[bold green]Refined Version {selected_version_idx + 1}[/bold green]",
+            border_style="green",
+            box=box.ROUNDED,
+        )
+    )
+    console.print()
+    console.print(Panel(
+        refined,
+        border_style="cyan",
+        box=box.ROUNDED,
+    ))
+    console.print()
+
+
+def _offer_refine_or_copy(results: List[dict], original_prompt: str, client: LLMClient) -> None:
+    """Simplified options after optimization."""
+    while True:
+        console.print()
+        choice = Prompt.ask(
+            "[cyan]选择版本复制[/cyan] [dim](1-4)[/dim]，或 [yellow]输入数字+空格+反馈来细化[/yellow] [dim]例如: 3 添加更多安全约束[/dim]",
+            default="",
+        )
+
+        # Empty input - exit
+        if not choice.strip():
+            break
+
+        # If just a number, copy
+        if choice.strip().isdigit():
+            index = int(choice.strip()) - 1
+            if 0 <= index < len(results):
+                if copy_to_clipboard(results[index]["prompt"]):
+                    print_success("已复制到剪贴板")
+                else:
+                    print_warning("剪贴板不可用")
+            else:
+                print_error(f"无效版本号: {choice}")
+            continue
+
+        # Parse "number + feedback" format: "3 添加更多安全约束"
+        parts = choice.strip().split(maxsplit=1)
+        if len(parts) >= 1 and parts[0].isdigit():
+            idx = int(parts[0]) - 1
+            if 0 <= idx < len(results):
+                feedback = parts[1] if len(parts) > 1 else ""
+                if feedback:
+                    refine_prompt(original_prompt, results, client, idx)
+                else:
+                    print_warning("请输入反馈内容，例如: 3 添加更多安全约束")
+            else:
+                print_error(f"无效版本号: {parts[0]}")
+            continue
+
+        print_error("输入格式: 1-4 复制，3 你的反馈 细化版本")
+
+
 def optimize_prompt(prompt: str, client: LLMClient) -> None:
     manager = get_requirement_manager()
     current_doc = manager.get_current_doc()
@@ -509,13 +669,146 @@ def optimize_prompt(prompt: str, client: LLMClient) -> None:
             model=client.get_current_model(),
         )
 
-    _offer_copy_to_clipboard(results)
+    _offer_refine_or_copy(results, prompt, client)
+
+
+def _setup_provider_interactive() -> bool:
+    """Interactive provider setup when connection fails."""
+    from src.ui.console import console
+
+    console.print()
+    console.print(
+        Panel(
+            "[bold]Unable to connect to the configured LLM service[/bold]\n"
+            "[dim]Please select a provider to use:[/dim]",
+            border_style="yellow",
+            box=box.ROUNDED,
+        )
+    )
+    console.print()
+
+    providers = [
+        ("1", "ollama", "Local Ollama (free, runs on your machine)"),
+        ("2", "openai", "OpenAI API (GPT-4, GPT-4o, etc.)"),
+        ("3", "claude", "Claude API (Anthropic Claude)"),
+        ("4", "custom", "Custom OpenAI-compatible API"),
+    ]
+
+    for num, name, desc in providers:
+        console.print(f"  [cyan]{num}[/cyan]. [bold]{name}[/bold] - {desc}")
+
+    console.print()
+
+    while True:
+        choice = Prompt.ask("[cyan]Select provider[/cyan] [dim](1-4)[/dim]", default="")
+        if choice not in {"1", "2", "3", "4"}:
+            print_error("Please enter a number between 1 and 4")
+            continue
+
+        provider_map = {"1": "ollama", "2": "openai", "3": "claude", "4": "custom"}
+        provider = provider_map[choice]
+        break
+
+    # Configure provider-specific settings
+    if provider == "ollama":
+        url = Prompt.ask(
+            "[cyan]Ollama URL[/cyan]",
+            default=global_config.ollama_base_url or "http://localhost:11434",
+        )
+        global_config.update(provider="ollama", ollama_base_url=url)
+        print_success(f"Provider set to [bold]ollama[/bold] (URL: {url})")
+
+    elif provider == "openai":
+        api_key = Prompt.ask(
+            "[cyan]OpenAI API Key[/cyan]",
+            password=True,
+            default=global_config.openai_api_key,
+        )
+        url = Prompt.ask(
+            "[cyan]API Base URL[/cyan]",
+            default=global_config.openai_base_url or "https://api.openai.com/v1",
+        )
+        model = Prompt.ask(
+            "[cyan]Model[/cyan]",
+            default=global_config.openai_model or "gpt-4o-mini",
+        )
+        global_config.update(
+            provider="openai",
+            openai_api_key=api_key,
+            openai_base_url=url,
+            openai_model=model,
+        )
+        print_success(f"Provider set to [bold]openai[/bold] (Model: {model})")
+
+    elif provider == "claude":
+        api_key = Prompt.ask(
+            "[cyan]Claude API Key[/cyan]",
+            password=True,
+            default=global_config.claude_api_key,
+        )
+        url = Prompt.ask(
+            "[cyan]API Base URL[/cyan]",
+            default=global_config.claude_base_url or "https://api.anthropic.com",
+        )
+        model = Prompt.ask(
+            "[cyan]Model[/cyan]",
+            default=global_config.claude_model or "claude-3-5-sonnet-20241022",
+        )
+        global_config.update(
+            provider="claude",
+            claude_api_key=api_key,
+            claude_base_url=url,
+            claude_model=model,
+        )
+        print_success(f"Provider set to [bold]claude[/bold] (Model: {model})")
+
+    elif provider == "custom":
+        api_key = Prompt.ask(
+            "[cyan]API Key[/cyan]",
+            password=True,
+            default=global_config.custom_api_key,
+        )
+        url = Prompt.ask(
+            "[cyan]API Base URL[/cyan]",
+            default=global_config.custom_base_url or "",
+        )
+        model = Prompt.ask(
+            "[cyan]Model[/cyan]",
+            default=global_config.custom_model or "",
+        )
+        global_config.update(
+            provider="custom",
+            custom_api_key=api_key,
+            custom_base_url=url,
+            custom_model=model,
+        )
+        print_success(f"Provider set to [bold]custom[/bold] (Model: {model})")
+
+    console.print()
+    console.print("[dim]Configuration saved. Please restart PromptPro to use the new provider.[/dim]")
+    console.print()
+    return False
 
 
 def _connect_client(client: LLMClient, requested_model: Optional[str] = None) -> bool:
     if not client.check_connection():
-        print_error("Unable to connect to the configured LLM service")
-        return False
+        # Offer interactive setup
+        console.print()
+        setup_choice = Prompt.ask(
+            "[yellow]Connection failed. Setup new provider?[/yellow] [dim](y/n)[/dim]",
+            default="y",
+        )
+        if setup_choice.lower() == "y":
+            if not _setup_provider_interactive():
+                return False
+            # Try again with new config - create new client
+            client = LLMClient(global_config)
+            if not client.check_connection():
+                print_error("Still unable to connect with the new configuration")
+                return False
+        else:
+            print_error("Unable to connect to the configured LLM service")
+            return False
 
     if global_config.provider == "ollama":
         models = client.list_models()
@@ -653,6 +946,9 @@ def quick_optimize(
         f"[dim]Framework: [cyan]{PROMPT_FRAMEWORKS[selected_framework].name}[/cyan] "
         f"({reason})[/dim]\n"
     )
+
+    # CLI mode: skip clarify (requires interactive input)
+    # Use interactive mode (pp without prompt) for clarify
 
     results = generate_optimized_versions(prompt, client, num_versions=level, framework=selected_framework)
     if not results:
