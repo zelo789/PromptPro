@@ -1,196 +1,114 @@
 # PromptPro
 
-PromptPro is a Python CLI for rewriting rough prompts into clearer and more structured prompts.
+将粗糙的提示词优化为更清晰、结构化的提示词。
 
-The current codebase focuses on:
-
-- Interactive prompt optimization in the terminal
-- One-shot CLI usage
-- Multiple optimization levels
-- Framework-based prompt rewriting
-- Provider switching across `ollama`, `openai`, `claude`, and `custom`
-- Optional history, clipboard copy, clarifying questions, and requirement documents
-
-## Installation
-
-Requirements:
-
-- Python 3.9+
-
-Install the package:
+## 安装
 
 ```bash
 pip install -e .
 ```
 
-Install development dependencies:
+## 快速开始
 
-```bash
-pip install -e ".[dev]"
-```
-
-Install clipboard support:
-
-```bash
-pip install -e ".[clipboard]"
-```
-
-## Quick Start
-
-Start interactive mode:
+### 交互模式（推荐）
 
 ```bash
 pp
 ```
 
-Optimize one prompt directly:
+输入你的需求，会依次进行：
+1. **需求澄清** - 回答问题让优化更精准
+2. **生成4个版本** - Light / Moderate / Deep / Framework
+3. **选择复制** - 输入版本号复制到剪贴板
+4. **细化优化** - 可以继续输入反馈细化某个版本
+
+### 命令行模式
 
 ```bash
-pp "Write a clearer prompt for designing a login system"
+pp "设计一个登录功能"
 ```
 
-Show current config:
+快速优化，适合脚本调用。
 
-```bash
-pp --config
+## 使用流程
+
+```
+1. 输入需求
+   > 设计一个电商用户系统
+
+2. 回答澄清问题（可选）
+   1. 这个系统面向什么用户？ → 普通消费者
+   2. 需要支持哪些登录方式？ → 手机号、邮箱、微信
+   ...
+
+3. 查看优化结果
+   ╭──────────────────────────────────────╮
+   │ Version 1: Light optimization       │
+   │ Version 2: Moderate optimization     │
+   │ Version 3: Deep optimization         │
+   │ Version 4: RTF framework             │
+   ╰──────────────────────────────────────╯
+
+4. 选择并复制
+   选择版本复制 (1-4)，或 输入数字+空格+反馈来细化
+   例如: 3 添加更多安全约束
+
+   → 输入 2 复制版本2到剪贴板
 ```
 
-List models for the active provider:
+## 配置 LLM 提供商
 
-```bash
-pp --models
+首次运行如果连接失败，会自动弹出选择框：
+
+```
+1. ollama - 本地 Ollama
+2. openai - OpenAI API
+3. claude - Anthropic Claude
+4. custom - 自定义 API（如 SiliconFlow）
 ```
 
-## Providers
+### SiliconFlow 示例
 
-PromptPro currently supports four provider modes:
+```
+选择 provider: 4 (custom)
+API Base URL: https://api.siliconflow.cn/v1
+API Key: 你的key
+Model: Qwen/Qwen2.5-7B-Instruct
+```
 
-- `ollama`
-- `openai`
-- `claude`
-- `custom`
-
-`custom` is intended for OpenAI-compatible endpoints.
-
-## Environment Variables
-
-Copy `.env.example` and set only the values you actually need.
-
-Common variables:
-
-- `PROMPTPRO_PROVIDER`
-- `PROMPTPRO_MODEL`
-- `PROMPTPRO_CONFIG_DIR`
-- `PROMPTPRO_TEMPERATURE`
-- `PROMPTPRO_TIMEOUT`
-- `PROMPTPRO_MAX_RETRIES`
-- `PROMPTPRO_NUM_VERSIONS`
-- `PROMPTPRO_MAX_HISTORY_ITEMS`
-- `PROMPTPRO_ENABLE_HISTORY`
-- `PROMPTPRO_AUTO_CLIPBOARD`
-- `PROMPTPRO_ENABLE_CLARIFY`
-
-Provider-specific variables:
-
-- `OLLAMA_BASE_URL`
-- `OPENAI_API_KEY`
-- `OPENAI_BASE_URL`
-- `CLAUDE_API_KEY`
-- `CLAUDE_BASE_URL`
-- `CUSTOM_API_KEY`
-- `CUSTOM_BASE_URL`
-
-Example custom provider setup:
+或通过环境变量：
 
 ```bash
 export PROMPTPRO_PROVIDER=custom
-export CUSTOM_BASE_URL=https://your-endpoint.example/v1
-export CUSTOM_API_KEY=your-key
-export PROMPTPRO_MODEL=your-model-name
-pp
+export CUSTOM_BASE_URL=https://api.siliconflow.cn/v1
+export CUSTOM_API_KEY=sk-xxx
+export PROMPTPRO_MODEL=Qwen/Qwen2.5-7B-Instruct
 ```
 
-## Prompt Frameworks
+## 常用命令
 
-The framework selector currently includes:
+| 命令 | 说明 |
+|------|------|
+| `pp` | 交互模式 |
+| `pp "prompt"` | 命令行快速优化 |
+| `pp --config` | 查看当前配置 |
+| `pp --models` | 列出可用模型 |
 
-- `co_star`
-- `rtf`
-- `create`
-- `ape`
-- `broke`
-- `risen`
-- `tag`
+交互模式命令：
 
-Framework recommendation logic lives in `src/strategies.py`.
+| 命令 | 说明 |
+|------|------|
+| `/help` | 帮助 |
+| `/quit` | 退出 |
+| `/provider` | 切换提供商 |
+| `/model` | 切换模型 |
+| `/config` | 查看配置 |
+| `/history` | 查看历史 |
+| `/clarify` | 开关澄清问题 |
 
-## Requirement Documents
+## 配置文件
 
-Requirement documents are stored in `prompts/` and parsed from a small Markdown-like format:
-
-```md
-name: Login System
-intro: |
-  This project is a web application with authentication and audit requirements.
-tune: |
-  - Prefer implementation-oriented answers.
-  - Be explicit about security constraints.
-```
-
-Relevant commands:
-
-- `/docs`
-- `/load <name>`
-- `/doc`
-- `/savedoc <name>`
-- `/cleardoc`
-
-## CLI Commands
-
-Core interactive commands:
-
-- `/help`
-- `/quit`
-- `/model`
-- `/provider`
-- `/frameworks`
-- `/config`
-- `/history`
-- `/temp <value>`
-- `/clarify`
-- `/docs`
-- `/load <name>`
-- `/doc`
-- `/savedoc <name>`
-- `/cleardoc`
-
-## Development
-
-Run tests:
-
-```bash
-python -m pytest -q -o addopts=
-```
-
-Run formatting and checks:
-
-```bash
-black src tests
-isort src tests
-flake8 src tests
-mypy src
-```
-
-## Repository Notes
-
-- Main package code lives in `src/`
-- Tests live in `tests/`
-- Requirement document samples live in `prompts/`
-- Provider config examples live in `examples/`
-
-## Contributing
-
-See `CONTRIBUTING.md`.
+配置文件位于 `~/.prompt-optimizer/config.json`
 
 ## License
 
